@@ -244,12 +244,12 @@ impl State {
     }
 
     pub fn hide_launcher(&mut self) {
-        if !self.launcher.visible { eprintln!("[LOG] hide_launcher: already hidden"); return }
-        drop(self.launcher.layer.take());
-        drop(self.launcher.surface.take());
-        drop(self.launcher.pool.take());
+        if !self.launcher.visible { return }
+        if let Some(l) = self.launcher.layer.take() { l.destroy(); }
+        if let Some(s) = self.launcher.surface.take() { s.destroy(); }
+        if let Some(p) = self.launcher.pool.take() { p.destroy(); }
         drop(self.launcher.mmap.take());
-        self.launcher.bufs.clear();
+        for b in self.launcher.bufs.drain(..) { b.destroy(); }
         self.launcher.next_buf = 0;
         self.launcher.configured = false;
         self.launcher.frame_pending = false;
