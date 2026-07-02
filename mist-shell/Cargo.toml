@@ -1,0 +1,10 @@
+[package]
+name = "mist-shell"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+guido = "0.5"
+chrono = "0.4"
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["staging", "client"] }

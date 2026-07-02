@@ -1,0 +1,6 @@
+[workspace]
+resolver = "3"
+members = [
+    "mist-shell",
+    "mist-compositor",
+]
