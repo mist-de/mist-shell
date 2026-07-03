@@ -3,75 +3,119 @@ use std::io::Read;
 use std::os::fd::FromRawFd;
 use std::os::unix::io::IntoRawFd;
 
-
+use std::ptr::NonNull;
+use raw_window_handle::{RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle};
 use wayland_client::globals::GlobalListContents;
-use wayland_client::protocol::wl_buffer::WlBuffer;
 use wayland_client::protocol::wl_callback::WlCallback;
 use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_keyboard::{KeyState, WlKeyboard};
 use wayland_client::protocol::wl_pointer::{Axis, ButtonState, WlPointer};
 use wayland_client::protocol::wl_region::WlRegion;
 use wayland_client::protocol::wl_seat::WlSeat;
-use wayland_client::protocol::wl_shm::WlShm;
-use wayland_client::protocol::wl_shm_pool::WlShmPool;
 use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum};
+use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::{Shape, WpCursorShapeDeviceV1};
+use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_manager_v1::WpCursorShapeManagerV1;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{self, ZwlrLayerSurfaceV1};
 use xkbcommon::xkb::{self, keysyms};
 
-use crate::bar::{render_bar, workspace_at_x};
+use crate::bar::{hit_test_workspace, render_bar};
 use crate::launcher;
 use crate::state::{BarCb, LauncherCb, State};
+
+fn create_wgpu_surface(state: &State, wl_surface: &WlSurface, w: u32, h: u32) -> Option<(wgpu::Surface<'static>, wgpu::TextureFormat)> {
+    let raw_display = {
+        let ptr = state.conn.backend().display_id().as_ptr() as *mut std::ffi::c_void;
+        RawDisplayHandle::Wayland(WaylandDisplayHandle::new(NonNull::new(ptr)?))
+    };
+    let raw_window = {
+        let ptr = wl_surface.id().as_ptr() as *mut std::ffi::c_void;
+        RawWindowHandle::Wayland(WaylandWindowHandle::new(NonNull::new(ptr)?))
+    };
+    let wgpu_surface = unsafe {
+        state.gpu_instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
+            raw_display_handle: Some(raw_display),
+            raw_window_handle: raw_window,
+        })
+    }.ok()?;
+    let adapter = pollster::block_on(state.gpu_instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::LowPower,
+        compatible_surface: Some(&wgpu_surface),
+        force_fallback_adapter: false,
+    })).ok()?;
+    let format = wgpu_surface.get_capabilities(&adapter).formats.into_iter()
+        .find(|f| *f == wgpu::TextureFormat::Rgba8Unorm)
+        .unwrap_or(wgpu::TextureFormat::Bgra8Unorm);
+    wgpu_surface.configure(&state.gpu_device, &wgpu::SurfaceConfiguration {
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        format,
+        width: w.max(1),
+        height: h.max(1),
+        present_mode: wgpu::PresentMode::Fifo,
+        alpha_mode: wgpu::CompositeAlphaMode::PreMultiplied,
+        view_formats: vec![],
+        desired_maximum_frame_latency: 1,
+    });
+    Some((wgpu_surface, format))
+}
 
 impl Dispatch<ZwlrLayerSurfaceV1, ()> for State {
     fn event(state: &mut Self, proxy: &ZwlrLayerSurfaceV1, event: <ZwlrLayerSurfaceV1 as wayland_client::Proxy>::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
         match event {
             zwlr_layer_surface_v1::Event::Configure { serial, width, height } => {
-
-                    if proxy.id() == state.bar.layer.id() {
+                if proxy.id() == state.bar.layer.id() {
                     proxy.ack_configure(serial);
-                    let w = if width > 0 { width as i32 } else { 1920 };
-                    let h = if height > 0 { (height as i32).min(crate::bar::BAR_H as i32) } else { crate::bar::BAR_H as i32 };
-                    let stride = w * 4;
-                    let buf_size = stride * h;
-                    if state.bar.pool.is_none() || state.bar.stride != stride || state.bar.buf_size < buf_size {
-                        let (mmap, pool, _, _) = crate::shm::setup_shm(&state.shm, &state.qh, w, h);
-                        state.bar.pool = Some(pool);
-                        state.bar.mmap = Some(mmap);
-                        state.bar.stride = stride;
-                        state.bar.buf_size = buf_size;
-                        state.bar.bufs.clear();
-                        state.bar.next_buf = 0;
-                    }
-                    state.bar.w = w;
-                    state.bar.h = h;
+                    state.bar.w = width.max(1) as i32;
+                    state.bar.h = height.max(1) as i32;
                     state.bar.configured = true;
-                    render_bar(state);
-                    state.commit_bar();
+                    if let Some(ref surface) = state.bar.wgpu_surface {
+                        surface.configure(&state.gpu_device, &wgpu::SurfaceConfiguration {
+                            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                            format: state.bar.surface_format,
+                            width: state.bar.w as u32,
+                            height: state.bar.h as u32,
+                            present_mode: wgpu::PresentMode::Fifo,
+                            alpha_mode: wgpu::CompositeAlphaMode::PreMultiplied,
+                            view_formats: vec![],
+                            desired_maximum_frame_latency: 1,
+                        });
+                    }
+                    let scene = render_bar(state);
+                    state.commit_bar(scene);
                 } else if let Some(ref l) = state.launcher.layer
                     && proxy.id() == l.id() {
-                        proxy.ack_configure(serial);
-                        let w = if width > 0 { width as i32 } else { 1920 };
-                        let h = if height > 0 { height as i32 } else { 1080 };
-                        let stride = w * 4;
-                        let buf_size = stride * h;
-                        if state.launcher.pool.is_none() || state.launcher.stride != stride || state.launcher.buf_size < buf_size {
-                            let (mmap, pool, _, _) = crate::shm::setup_shm(&state.shm, &state.qh, w, h);
-                            state.launcher.pool = Some(pool);
-                            state.launcher.mmap = Some(mmap);
-                            state.launcher.stride = stride;
-                            state.launcher.buf_size = buf_size;
-                            state.launcher.bufs.clear();
-                            state.launcher.next_buf = 0;
+                    proxy.ack_configure(serial);
+                    let w = if width > 0 { width as i32 } else { 1920 };
+                    let h = if height > 0 { height as i32 } else { 1080 };
+                    state.launcher.w = w;
+                    state.launcher.h = h;
+                    state.launcher.configured = true;
+
+                    if state.launcher.wgpu_surface.is_none() {
+                        if let Some(ref wl_surface) = state.launcher.surface {
+                            if let Some((s, fmt)) = create_wgpu_surface(state, wl_surface, w as u32, h as u32) {
+                                state.launcher.wgpu_surface = Some(s);
+                                state.launcher.surface_format = fmt;
+                            }
                         }
-                        state.launcher.w = w;
-                        state.launcher.h = h;
-                        state.launcher.configured = true;
-                        let panel = launcher::render_launcher(state);
-                        state.launcher.panel = Some(panel);
-                        state.commit_launcher();
+                    } else if let Some(ref wgpu_surface) = state.launcher.wgpu_surface {
+                        wgpu_surface.configure(&state.gpu_device, &wgpu::SurfaceConfiguration {
+                            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                            format: state.launcher.surface_format,
+                            width: w as u32,
+                            height: h as u32,
+                            present_mode: wgpu::PresentMode::Fifo,
+                            alpha_mode: wgpu::CompositeAlphaMode::PreMultiplied,
+                            view_formats: vec![],
+                            desired_maximum_frame_latency: 1,
+                        });
                     }
+
+                    let (scene, panel) = launcher::render_launcher(state);
+                    state.launcher.panel = Some(panel);
+                    state.commit_launcher(scene);
+                }
             }
             zwlr_layer_surface_v1::Event::Closed
                 if proxy.id() == state.bar.layer.id() => {
@@ -91,8 +135,8 @@ impl Dispatch<WlCallback, BarCb> for State {
         if let wayland_client::protocol::wl_callback::Event::Done { .. } = event {
             state.bar.frame_pending = false;
             if state.bar.dirty && state.bar.configured {
-                render_bar(state);
-                state.commit_bar();
+                let scene = render_bar(state);
+                state.commit_bar(scene);
             }
         }
     }
@@ -102,17 +146,9 @@ impl Dispatch<WlCallback, LauncherCb> for State {
     fn event(state: &mut Self, _: &WlCallback, event: <WlCallback as wayland_client::Proxy>::Event, _: &LauncherCb, _: &Connection, _: &QueueHandle<Self>) {
         if let wayland_client::protocol::wl_callback::Event::Done { .. } = event {
             state.launcher.frame_pending = false;
-            if state.launcher.dirty && state.launcher.configured && state.launcher.visible {
-                let panel = launcher::render_launcher(state);
-                state.launcher.panel = Some(panel);
-                state.commit_launcher();
-            }
+            state.flush_launcher_render();
         }
     }
-}
-
-impl Dispatch<WlBuffer, ()> for State {
-    fn event(_: &mut Self, _: &WlBuffer, _: <WlBuffer as wayland_client::Proxy>::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
 }
 
 impl Dispatch<wayland_client::protocol::wl_display::WlDisplay, GlobalListContents> for State {
@@ -121,14 +157,6 @@ impl Dispatch<wayland_client::protocol::wl_display::WlDisplay, GlobalListContent
 
 impl Dispatch<wayland_client::protocol::wl_registry::WlRegistry, GlobalListContents> for State {
     fn event(_: &mut Self, _: &wayland_client::protocol::wl_registry::WlRegistry, _: <wayland_client::protocol::wl_registry::WlRegistry as wayland_client::Proxy>::Event, _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>) {}
-}
-
-impl Dispatch<WlShm, ()> for State {
-    fn event(_: &mut Self, _: &WlShm, _: <WlShm as wayland_client::Proxy>::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
-}
-
-impl Dispatch<WlShmPool, ()> for State {
-    fn event(_: &mut Self, _: &WlShmPool, _: <WlShmPool as wayland_client::Proxy>::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
 }
 
 impl Dispatch<WlCompositor, ()> for State {
@@ -153,7 +181,11 @@ impl Dispatch<WlSeat, ()> for State {
             && let WEnum::Value(caps) = capabilities
         {
             if caps.contains(wayland_client::protocol::wl_seat::Capability::Pointer) {
-                state.pointer = Some(proxy.get_pointer(qh, ()));
+                let pointer = proxy.get_pointer(qh, ());
+                if let Some(ref mgr) = state.cursor_shape_manager {
+                    state.cursor_shape_device = Some(mgr.get_pointer(&pointer, qh, ()));
+                }
+                state.pointer = Some(pointer);
             }
             if caps.contains(wayland_client::protocol::wl_seat::Capability::Keyboard) {
                 state.keyboard = Some(proxy.get_keyboard(qh, ()));
@@ -170,6 +202,7 @@ impl Dispatch<WlKeyboard, ()> for State {
                 let raw = fd.into_raw_fd();
                 let dup = unsafe { libc::dup(raw) };
                 unsafe { libc::close(raw); }
+                if dup < 0 { eprintln!("dup(keymap fd) failed"); return; }
                 let mut file = unsafe { File::from_raw_fd(dup) };
                 let mut buf = String::with_capacity(size as usize);
                 if file.read_to_string(&mut buf).is_ok() && !buf.is_empty() {
@@ -209,7 +242,12 @@ impl Dispatch<WlKeyboard, ()> for State {
                 if sym == keysyms::KEY_Escape.into() {
                     state.hide_launcher();
                 } else if sym == keysyms::KEY_Return.into() || sym == keysyms::KEY_KP_Enter.into() {
-                    if state.launcher.is_action_mode {
+                    if state.launcher.view == crate::launcher::LauncherView::CalcResult && state.launcher.selection == 0 {
+                        if let Some(ref res) = state.launcher.calc_result {
+                            let _ = std::process::Command::new("wl-copy").arg(res).spawn();
+                        }
+                        state.hide_launcher();
+                    } else if state.launcher.view == crate::launcher::LauncherView::ActionList {
                         if let Some(&act_idx) = state.launcher.matching_actions.get(state.launcher.selection) {
                             if let Some(act) = state.launcher.actions.get(act_idx) {
                                 if act.command.first().copied() == Some("autocomplete") {
@@ -233,7 +271,7 @@ impl Dispatch<WlKeyboard, ()> for State {
                     } else {
                         if let Some(&idx) = state.launcher.matching.get(state.launcher.selection)
                             && let Some(app) = state.launcher.apps.get(idx) {
-                                crate::launcher::launch_app(&app.exec);
+                                crate::launcher::launch_desktop_app(app, None);
                             }
                         state.hide_launcher();
                     }
@@ -241,28 +279,26 @@ impl Dispatch<WlKeyboard, ()> for State {
                     state.launcher.query.pop();
                     state.update_launcher_filter();
                 } else if sym == keysyms::KEY_Up.into() {
-                    let len = if state.launcher.is_action_mode { state.launcher.matching_actions.len() } else { state.launcher.matching.len() };
+                    let len = match state.launcher.view {
+                        crate::launcher::LauncherView::ActionList | crate::launcher::LauncherView::CalcResult => state.launcher.matching_actions.len(),
+                        crate::launcher::LauncherView::AppList => state.launcher.matching.len(),
+                    };
                     if len > 0 && state.launcher.selection > 0 {
                         state.launcher.selection -= 1;
                         state.ensure_selection_visible();
                         state.launcher.dirty = true;
-                        if state.launcher.configured && !state.launcher.frame_pending {
-                            let panel = crate::launcher::render_launcher(state);
-                            state.launcher.panel = Some(panel);
-                            state.commit_launcher();
-                        }
+                        state.flush_launcher_render();
                     }
                 } else if sym == keysyms::KEY_Down.into() {
-                    let len = if state.launcher.is_action_mode { state.launcher.matching_actions.len() } else { state.launcher.matching.len() };
+                    let len = match state.launcher.view {
+                        crate::launcher::LauncherView::ActionList | crate::launcher::LauncherView::CalcResult => state.launcher.matching_actions.len(),
+                        crate::launcher::LauncherView::AppList => state.launcher.matching.len(),
+                    };
                     if len > 0 && state.launcher.selection + 1 < len {
                         state.launcher.selection += 1;
                         state.ensure_selection_visible();
                         state.launcher.dirty = true;
-                        if state.launcher.configured && !state.launcher.frame_pending {
-                            let panel = crate::launcher::render_launcher(state);
-                            state.launcher.panel = Some(panel);
-                            state.commit_launcher();
-                        }
+                        state.flush_launcher_render();
                     }
                 } else if !utf8.is_empty() && utf8.chars().all(|c| !c.is_control()) {
                     state.launcher.query.push_str(&utf8);
@@ -279,99 +315,198 @@ impl Dispatch<WlKeyboard, ()> for State {
     }
 }
 
+fn in_search_bar(px: f32, py: f32, pw: f32, ph: f32, sx: f32, sy: f32) -> bool {
+    let pad = 12.0;
+    let search_h = 42.0;
+    let search_x = px + pad;
+    let search_y = py + ph - pad - search_h;
+    sx >= search_x && sx <= search_x + pw - pad * 2.0 && sy >= search_y && sy <= search_y + search_h
+}
+
+fn set_search_cursor(state: &mut State, serial: u32) {
+    if state.current_cursor == Some(Shape::Text) { return }
+    if let Some(ref dev) = state.cursor_shape_device {
+        dev.set_shape(serial, Shape::Text);
+        state.current_cursor = Some(Shape::Text);
+    }
+}
+
+fn set_default_cursor(state: &mut State, serial: u32) {
+    if state.current_cursor == Some(Shape::Default) { return }
+    if let Some(ref dev) = state.cursor_shape_device {
+        dev.set_shape(serial, Shape::Default);
+        state.current_cursor = Some(Shape::Default);
+    }
+}
+
 impl Dispatch<WlPointer, ()> for State {
     fn event(state: &mut Self, _: &WlPointer, event: <WlPointer as wayland_client::Proxy>::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
         match event {
-            wayland_client::protocol::wl_pointer::Event::Enter { surface, surface_x, surface_y, .. } => {
+            wayland_client::protocol::wl_pointer::Event::Enter { surface_x, surface_y, serial, .. } => {
+                state.current_cursor = None;
                 state.pointer_x = surface_x;
                 state.pointer_y = surface_y;
-                state.current_surface = Some(surface);
+                state.pointer_serial = serial;
+                if let Some((px, py, pw, ph)) = state.launcher.panel
+                    && in_search_bar(px, py, pw, ph, surface_x as f32, surface_y as f32) {
+                        set_search_cursor(state, serial);
+                    } else {
+                        set_default_cursor(state, serial);
+                    }
+                update_hover(state);
             }
             wayland_client::protocol::wl_pointer::Event::Motion { surface_x, surface_y, .. } => {
                 state.pointer_x = surface_x;
                 state.pointer_y = surface_y;
+                if let Some((px, py, pw, ph)) = state.launcher.panel
+                    && in_search_bar(px, py, pw, ph, surface_x as f32, surface_y as f32) {
+                        set_search_cursor(state, state.pointer_serial);
+                    } else {
+                        set_default_cursor(state, state.pointer_serial);
+                    }
+                update_hover(state);
             }
             wayland_client::protocol::wl_pointer::Event::Leave { .. } => {
-                state.current_surface = None;
+                state.current_cursor = None;
+                set_default_cursor(state, state.pointer_serial);
+                if state.hovered_ws.is_some() {
+                    state.hovered_ws = None;
+                    state.bar.dirty = true;
+                    if state.bar.configured && !state.bar.frame_pending {
+                        let scene = render_bar(state);
+                        state.commit_bar(scene);
+                    }
+                }
             }
-            wayland_client::protocol::wl_pointer::Event::Button { button, state: btn_state, .. } => {
+            wayland_client::protocol::wl_pointer::Event::Button { button, state: btn_state, serial, .. } => {
                 let press = matches!(btn_state, WEnum::Value(ButtonState::Pressed));
-                eprintln!("[LOG] Button: btn={:#x} press={} visible={} ptr=({:.0},{:.0})", button, press, state.launcher.visible, state.pointer_x, state.pointer_y);
-
+                if press {
+                    state.pointer_serial = serial;
+                }
                 if state.launcher.visible {
                     if press {
-                        if let Some((px, py, pw, ph)) = state.launcher.panel {
-                            let sx = state.pointer_x as f32;
-                            let sy = state.pointer_y as f32;
-                            if sx >= px && sx <= px + pw && sy >= py && sy <= py + ph {
-                                let start_y = py + 12.0;
-                                let item_h = 38.0;
-                                let rel_y = sy - start_y;
-                                if rel_y >= 0.0 {
-                                    let idx = (rel_y / item_h) as usize;
-                                    if state.launcher.is_action_mode {
-                                        if let Some(&act_idx) = state.launcher.matching_actions.get(idx)
-                                            && let Some(act) = state.launcher.actions.get(act_idx) {
-                                                if act.command.first().copied() == Some("autocomplete") {
-                                                    if let Some(cmd) = act.command.get(1) {
-                                                        state.launcher.query = format!(">{} ", cmd);
-                                                        state.update_launcher_filter();
-                                                        state.launcher.dirty = true;
-                                                        if state.launcher.configured && !state.launcher.frame_pending {
-                                                            let panel = launcher::render_launcher(state);
-                                                            state.launcher.panel = Some(panel);
-                                                            state.commit_launcher();
+                        if state.launcher.configured {
+                            if let Some((px, py, pw, ph)) = state.launcher.panel {
+                                let (sx, sy) = (state.pointer_x as f32, state.pointer_y as f32);
+                                if std::env::var("MIST_DEBUG").map(|v| v == "1").unwrap_or(false) { eprintln!("[mist] click sx={:.1} sy={:.1} panel=({:.0},{:.0} {:.0}x{:.0})", sx, sy, px, py, pw, ph); }
+                                if sx >= px && sx <= px + pw && sy >= py && sy <= py + ph {
+                                    let pad = 12.0;
+                                    let search_h = 42.0;
+                                    let item_h = 38.0;
+                                    let start_y = py + pad;
+                                    let search_y = py + ph - pad - search_h;
+                                    let div_y = search_y - 10.0;
+                                    let max_visible = ((div_y - 10.0 - start_y) / item_h).max(1.0) as usize;
+                                    let rel_y = sy - start_y;
+                                    if std::env::var("MIST_DEBUG").map(|v| v == "1").unwrap_or(false) { eprintln!("[mist] click in panel rel_y={:.1} div_y={:.1} max_visible={}", rel_y, div_y, max_visible); }
+                                    if rel_y >= 0.0 && sy < div_y {
+                                        let row = (rel_y / item_h) as usize;
+                                        if row < max_visible {
+                                            let idx = state.launcher.scroll_offset + row;
+                                            if state.launcher.view != crate::launcher::LauncherView::AppList {
+                                                if let Some(&act_idx) = state.launcher.matching_actions.get(idx)
+                                                    && let Some(act) = state.launcher.actions.get(act_idx) {
+                                                        if act.command.first().copied() == Some("autocomplete") {
+                                                            if let Some(cmd) = act.command.get(1) {
+                                                                state.launcher.query = format!(">{} ", cmd);
+                                                                state.update_launcher_filter();
+                                                                return;
+                                                            }
+                                                        } else if act.command.first().copied() == Some("setMode") {
+                                                            state.hide_launcher();
+                                                            return;
+                                                        } else {
+                                                            let exec = act.command.join(" ");
+                                                            if !exec.is_empty() { launcher::launch_app(&exec); }
+                                                            state.hide_launcher();
+                                                            return;
                                                         }
-                                                        return;
                                                     }
-                                                } else if act.command.first().copied() == Some("setMode") {
+                                            } else if let Some(&app_idx) = state.launcher.matching.get(idx)
+                                                && let Some(app) = state.launcher.apps.get(app_idx) {
+                                                    launcher::launch_desktop_app(app, None);
                                                     state.hide_launcher();
                                                     return;
-                                                } else {
-                                                    let exec = act.command.join(" ");
-                                                    if !exec.is_empty() { launcher::launch_app(&exec); }
                                                 }
-                                            }
-                                    } else if let Some(&app_idx) = state.launcher.matching.get(idx)
-                                        && let Some(app) = state.launcher.apps.get(app_idx) {
-                                            launcher::launch_app(&app.exec);
                                         }
+                                    }
+                                    if std::env::var("MIST_DEBUG").map(|v| v == "1").unwrap_or(false) { eprintln!("[mist] click in panel, no item — keep open"); }
+                                    return;
                                 }
+                                if std::env::var("MIST_DEBUG").map(|v| v == "1").unwrap_or(false) { eprintln!("[mist] click outside panel — dismiss"); }
                             }
                         }
                         state.hide_launcher();
                     }
                 } else if press && button == 0x110 {
-                    let ws = workspace_at_x(state, state.pointer_x).map(|s| s.to_string());
-                    if let Some(ref ws) = ws {
-                        eprintln!("[LOG] bar_click: switching to workspace {}", ws);
-                        for (name, tag) in &mut state.workspaces {
-                            tag.active = name == ws;
-                        }
-                        state.bar.dirty = true;
-                        if state.bar.configured {
-                            render_bar(state);
-                            state.commit_bar();
-                        }
-                        if let Ok(idx) = ws.parse::<u32>() {
-                            let _ = std::process::Command::new("mmsg")
-                                .args(["dispatch", &format!("view,{}", idx)])
-                                .spawn();
+                    let ws_idx = hit_test_workspace(state, state.pointer_x, state.pointer_y);
+                    if let Some(idx) = ws_idx {
+                        if let Some(ws_name) = state.workspaces.get(idx).map(|(n, _)| n.clone()) {
+                            for (name, tag) in &mut state.workspaces {
+                                tag.active = *name == ws_name;
+                            }
+                            state.bar.dirty = true;
+                            if state.bar.configured {
+                                let scene = render_bar(state);
+                                state.commit_bar(scene);
+                            }
+                            crate::compositor::focus_workspace(state.compositor_type, &ws_name);
                         }
                     }
                 }
             }
             wayland_client::protocol::wl_pointer::Event::Axis { axis, value, .. } => {
-                if let WEnum::Value(Axis::VerticalScroll) = axis
-                    && state.launcher.visible
-                        && let Some((px, py, pw, ph)) = state.launcher.panel {
+                if let WEnum::Value(Axis::VerticalScroll) = axis {
+                    if state.launcher.visible {
+                        if let Some((px, py, pw, ph)) = state.launcher.panel {
                             let (sx, sy) = (state.pointer_x as f32, state.pointer_y as f32);
                             if sx >= px && sx <= px + pw && sy >= py && sy <= py + ph {
                                 state.scroll_launcher(value.signum() as i32 * 3);
+                                return;
                             }
                         }
+                        return;
+                    }
+                    if hit_test_workspace(state, state.pointer_x, state.pointer_y).is_some() {
+                        let dir = if value > 0.0 { 1 } else { -1 };
+                        let idx = state.workspaces.iter().position(|(_, t)| t.active).unwrap_or(0);
+                        let n = state.workspaces.len();
+                        let new_idx = if dir > 0 { (idx + 1) % n } else { (idx + n - 1) % n };
+                        let ws_name = state.workspaces.get(new_idx).map(|(n, _)| n.clone());
+                        for (_, tag) in &mut state.workspaces { tag.active = false; }
+                        if let Some((_, tag)) = state.workspaces.get_mut(new_idx) { tag.active = true; }
+                        state.bar.dirty = true;
+                        if state.bar.configured && !state.bar.frame_pending {
+                            let scene = render_bar(state);
+                            state.commit_bar(scene);
+                        }
+                        if let Some(ref name) = ws_name {
+                            crate::compositor::focus_workspace(state.compositor_type, name);
+                        }
+                    }
+                }
             }
             _ => {}
         }
     }
+}
+
+fn update_hover(state: &mut State) {
+    let old = state.hovered_ws;
+    state.hovered_ws = hit_test_workspace(state, state.pointer_x, state.pointer_y);
+    if old != state.hovered_ws {
+        state.bar.dirty = true;
+        if state.bar.configured && !state.bar.frame_pending {
+            let scene = render_bar(state);
+            state.commit_bar(scene);
+        }
+    }
+}
+
+impl Dispatch<WpCursorShapeManagerV1, ()> for State {
+    fn event(_: &mut Self, _: &WpCursorShapeManagerV1, _: <WpCursorShapeManagerV1 as Proxy>::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+}
+
+impl Dispatch<WpCursorShapeDeviceV1, ()> for State {
+    fn event(_: &mut Self, _: &WpCursorShapeDeviceV1, _: <WpCursorShapeDeviceV1 as Proxy>::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
 }

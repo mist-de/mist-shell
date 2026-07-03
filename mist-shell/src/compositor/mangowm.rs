@@ -31,16 +31,32 @@ fn parse_ws(line: &str) -> Option<WsList> {
     }).collect())
 }
 
-pub fn spawn_ipc(sender: channel::Sender<WsList>) {
-    std::thread::spawn(move || loop {
-        let path = std::env::var("MANGO_INSTANCE_SIGNATURE").ok();
-        let Some(ref path) = path else { std::thread::sleep(Duration::from_secs(2)); continue };
-        let Ok(stream) = UnixStream::connect(path) else { std::thread::sleep(Duration::from_secs(2)); continue };
-        let _ = (&stream).write_all(b"watch all-monitors\n");
-        for line in BufReader::new(&stream).lines() {
-            let Ok(line) = line else { break };
-            if let Some(list) = parse_ws(&line) && sender.send(list).is_err() { return }
+pub fn spawn_poller(sender: channel::Sender<WsList>) {
+    std::thread::spawn(move || {
+        let mut delay = Duration::from_millis(100);
+        loop {
+            let path = match std::env::var("MANGO_INSTANCE_SIGNATURE") {
+                Ok(p) => p,
+                Err(_) => { std::thread::sleep(delay); delay = (delay * 2).min(Duration::from_secs(30)); continue; }
+            };
+            let stream = match UnixStream::connect(&path) {
+                Ok(s) => { delay = Duration::from_millis(100); s }
+                Err(_) => { std::thread::sleep(delay); delay = (delay * 2).min(Duration::from_secs(30)); continue; }
+            };
+            let _ = (&stream).write_all(b"watch all-monitors\n");
+            for line in BufReader::new(&stream).lines() {
+                let Ok(line) = line else { break };
+                if let Some(list) = parse_ws(&line) && sender.send(list).is_err() { return }
+            }
+            std::thread::sleep(Duration::from_millis(200));
         }
-        std::thread::sleep(Duration::from_millis(200));
     });
+}
+
+pub fn focus_workspace(name: &str) {
+    if let Ok(idx) = name.parse::<u32>() {
+        let _ = std::process::Command::new("mmsg")
+            .args(["dispatch", &format!("view,{}", idx)])
+            .spawn();
+    }
 }
