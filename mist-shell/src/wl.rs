@@ -436,9 +436,8 @@ impl Dispatch<WlPointer, ()> for State {
                     let ws_idx = hit_test_workspace(state, state.pointer_x, state.pointer_y);
                     if let Some(idx) = ws_idx {
                         if let Some(ws_name) = state.workspaces.get(idx).map(|(n, _)| n.clone()) {
-                            for (name, tag) in &mut state.workspaces {
-                                tag.active = *name == ws_name;
-                            }
+                            for (_, tag) in &mut state.workspaces { tag.active = false; }
+                            if let Some((_, tag)) = state.workspaces.get_mut(idx) { tag.active = true; }
                             state.bar.dirty = true;
                             if state.bar.configured {
                                 render_bar(state);
@@ -470,7 +469,7 @@ impl Dispatch<WlPointer, ()> for State {
                         for (_, tag) in &mut state.workspaces { tag.active = false; }
                         if let Some((_, tag)) = state.workspaces.get_mut(new_idx) { tag.active = true; }
                         state.bar.dirty = true;
-                        if state.bar.configured && !state.bar.frame_pending {
+                        if state.bar.configured {
                             render_bar(state);
                             state.commit_bar();
                         }

@@ -88,17 +88,17 @@ fn main() {
     let shm: WlShm = globals.bind(&qh, 1..=1, ()).expect("wl_shm");
     let cursor_shape_manager = globals.bind(&qh, 1..=1, ()).ok();
 
-    let bar_w = crate::tokens::BAR_TOTAL_W as i32;
+    let bar_h = crate::tokens::BAR_THICKNESS as i32;
     let surface = compositor.create_surface(&qh, ());
     let layer = layer_shell.get_layer_surface(&surface, None, Layer::Top, "mist-shell".into(), &qh, ());
-    layer.set_anchor(Anchor::Left | Anchor::Top | Anchor::Bottom);
-    layer.set_exclusive_zone(bar_w);
-    layer.set_size(bar_w as u32, 0);
+    layer.set_anchor(Anchor::Top | Anchor::Left | Anchor::Right);
+    layer.set_exclusive_zone(bar_h);
+    layer.set_size(0, bar_h as u32);
     surface.commit();
     let _ = conn.flush();
 
-    let init_w = bar_w;
-    let init_h = 1080i32;
+    let init_w = 1920i32;
+    let init_h = bar_h;
 
     let ct = compositor::detect();
     eprintln!("[mist] compositor: {:?}", ct);
@@ -144,6 +144,8 @@ fn main() {
 
     let _ = eq.roundtrip(&mut state);
 
+    state.clock = chrono::Local::now().format("%H:%M").to_string();
+
     if !state.bar.configured {
         state.bar.configured = true;
         render_bar(&mut state);
@@ -159,22 +161,22 @@ fn main() {
     let owned_fd = unsafe { OwnedFd::from_raw_fd(dup_fd) };
     let conn_ = Some(conn);
     let mut eq_ = Some(eq);
-    static WL_DISPATCH_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    handle.insert_source(Generic::new(owned_fd, Interest::READ, Mode::Edge), move |_, _, state: &mut State| -> Result<_, std::io::Error> {
+    handle.insert_source(Generic::new(owned_fd, Interest::READ, Mode::Level), move |_, _, state: &mut State| -> Result<_, std::io::Error> {
         let eq = eq_.as_mut().unwrap();
         let conn = conn_.as_ref().unwrap();
-        let count = WL_DISPATCH_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if count % 200 == 0 {
-            eprintln!("[mist-wl] dispatch #{}", count);
-        }
-        // Drain all pending events: keep reading and dispatching until no more events
+        let mut spins = 0u32;
         loop {
             if let Some(guard) = conn.prepare_read() {
                 if let Err(e) = guard.read() { eprintln!("read err: {:?}", e); std::process::exit(1) }
             }
             match eq.dispatch_pending(state) {
-                Ok(0) => break,
-                Ok(_) => continue,
+                Ok(0) => {
+                    spins += 1;
+                    if spins >= 10 {
+                        break;
+                    }
+                }
+                Ok(_) => { spins = 0; continue; }
                 Err(e) => { eprintln!("dispatch err: {:?}", e); std::process::exit(1) }
             }
         }
@@ -182,22 +184,19 @@ fn main() {
         Ok(calloop::PostAction::Continue)
     }).expect("wl source");
 
-    let mut last_status_poll = std::time::Instant::now();
-    let status_poll_interval = Duration::from_secs(10);
     let parsed_tz = state.config.timezone.as_deref().and_then(|s| s.parse::<chrono_tz::Tz>().ok());
-    let mut last_date = String::new();
     let mut last_clock = String::new();
-
+    let mut last_status_instant = std::time::Instant::now();
     static TIMER_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     handle.insert_source(Timer::from_duration(Duration::from_secs(1)), move |_, _, state: &mut State| {
         let count = TIMER_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if count % 30 == 0 {
+        if count > 0 && count % 60 == 0 {
             eprintln!("[mist-timer] tick #{} dirty={} configured={} fp={}", count, state.bar.dirty, state.bar.configured, state.bar.frame_pending);
         }
-        let now = std::time::Instant::now();
 
-        if now.duration_since(last_status_poll) >= status_poll_interval {
-            last_status_poll = now;
+        let elapsed = last_status_instant.elapsed();
+        if elapsed >= Duration::from_secs(10) {
+            last_status_instant = std::time::Instant::now();
             let new_status = crate::status::poll_status();
             if new_status != state.status {
                 state.status = new_status;
@@ -205,25 +204,14 @@ fn main() {
             }
         }
 
-        let (d, c) = match &parsed_tz {
-            Some(tz) => {
-                let now = chrono::Utc::now().with_timezone(tz);
-                (now.format("%a %b %-d").to_string(), now.format("%H:%M").to_string())
-            }
-            None => {
-                let now = chrono::Local::now();
-                (now.format("%a %b %-d").to_string(), now.format("%H:%M").to_string())
-            }
-        };
-        if d != last_date || c != last_clock {
-            last_date = d;
-            last_clock = c;
-            state.date = last_date.clone();
-            state.clock = last_clock.clone();
+        let c = chrono::Local::now().format("%H:%M").to_string();
+        if c != last_clock {
+            last_clock = c.clone();
+            state.clock = c;
             state.bar.dirty = true;
         }
 
-        if state.bar.dirty && state.bar.configured && !state.bar.frame_pending {
+        if state.bar.dirty && state.bar.configured {
             render_bar(state);
             state.commit_bar();
         }
@@ -233,11 +221,17 @@ fn main() {
         TimeoutAction::ToDuration(Duration::from_secs(1))
     }).expect("timer");
 
+    static WS_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     handle.insert_source(ws_rx, |event, _, state: &mut State| {
         if let calloop::channel::Event::Msg(list) = event && state.workspaces != list {
+            let count = WS_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let active: Vec<&str> = list.iter().filter(|(_, t)| t.active).map(|(n, _)| n.as_str()).collect();
+            if count < 10 {
+                eprintln!("[mist-ws] update #{} active={:?} total={}", count, active, list.len());
+            }
             state.workspaces = list;
             state.bar.dirty = true;
-            if state.bar.configured && !state.bar.frame_pending {
+            if state.bar.configured {
                 render_bar(state);
                 state.commit_bar();
             }

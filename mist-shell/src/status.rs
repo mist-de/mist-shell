@@ -1,4 +1,5 @@
 use std::fs;
+use std::sync::Mutex;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SystemStatus {
@@ -51,29 +52,38 @@ fn poll_network() -> bool {
     false
 }
 
+struct PulseState {
+    conn: zbus::blocking::Connection,
+    sink_path: String,
+}
+
+static PULSE: Mutex<Option<PulseState>> = Mutex::new(None);
+
 /// Query PulseAudio default sink mute state via D-Bus.
 /// Returns `None` if PulseAudio D-Bus is unavailable (not running, no session bus).
+/// Connection + sink path are cached after first successful query.
 fn poll_volume_zbus() -> Option<bool> {
-    let conn = zbus::blocking::Connection::session().ok()?;
-
-    // Get the default sink name from PulseAudio's core interface
-    let server_info = conn.call_method(
+    let mut guard = PULSE.lock().ok()?;
+    let state = match guard.as_ref() {
+        Some(s) => s,
+        None => {
+            let conn = zbus::blocking::Connection::session().ok()?;
+            let server_info = conn.call_method(
+                Some("org.PulseAudio1"),
+                "/org/pulseaudio/core1",
+                Some("org.PulseAudio1.Core"),
+                "GetSinks",
+                &(),
+            ).ok()?;
+            let sinks: Vec<zbus::zvariant::OwnedObjectPath> = server_info.body().deserialize().ok()?;
+            let path_str = sinks.first()?.to_string();
+            *guard = Some(PulseState { conn, sink_path: path_str });
+            guard.as_ref().unwrap()
+        }
+    };
+    let msg = state.conn.call_method(
         Some("org.PulseAudio1"),
-        "/org/pulseaudio/core1",
-        Some("org.PulseAudio1.Core"),
-        "GetSinks",
-        &(),
-    ).ok()?;
-
-    let sinks: Vec<zbus::zvariant::OwnedObjectPath> = server_info.body().deserialize().ok()?;
-
-    // Use the first sink as the default
-    let path_str = sinks.first()?.to_string();
-
-    // Check the Mute property
-    let msg = conn.call_method(
-        Some("org.PulseAudio1"),
-        path_str.as_str(),
+        state.sink_path.as_str(),
         Some("org.freedesktop.DBus.Properties"),
         "Get",
         &("org.PulseAudio1.Sink", "Mute"),

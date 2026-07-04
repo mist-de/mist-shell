@@ -23,16 +23,21 @@ pub fn spawn_shell_ipc(cmd_tx: channel::Sender<(u64, Value)>, resp: Option<(Send
     let streams2 = streams.clone();
     let next_id2 = next_id.clone();
     let cmd_tx2 = cmd_tx.clone();
-    if let Some((_resp_tx, resp_rx)) = resp {
+    if let Some((resp_tx, resp_rx)) = resp {
         std::thread::spawn(move || {
+            let _tx = resp_tx;
             loop {
-                if let Ok((id, resp)) = resp_rx.recv() {
-                    let map = streams.lock().unwrap();
-                    if let Some(stream) = map.get(&id) {
-                        let mut s = stream.try_clone().unwrap();
-                        let _ = writeln!(s, "{}", serde_json::to_string(&resp).unwrap());
-                        let _ = s.flush();
+                match resp_rx.recv() {
+                    Ok((id, resp)) => {
+                        let map = streams.lock().unwrap();
+                        if let Some(stream) = map.get(&id) {
+                            if let Ok(mut s) = stream.try_clone() {
+                                let _ = writeln!(s, "{}", serde_json::to_string(&resp).unwrap());
+                                let _ = s.flush();
+                            }
+                        }
                     }
+                    Err(_) => break,
                 }
             }
         });

@@ -1,62 +1,57 @@
-// ---- Spacing (from Caelestia tokens.hpp) ----
-pub const SPACE_XS: f32 = 4.0;
-pub const SPACE_MD: f32 = 12.0;
+// ---- Noctalia color palette (dark) ----
+pub const C_SURFACE: (u8, u8, u8, u8) = (0x07, 0x07, 0x22, 0xFF);
+pub const C_ON_SURFACE: (u8, u8, u8, u8) = (0xF3, 0xED, 0xF7, 0xFF);
+pub const C_PRIMARY: (u8, u8, u8, u8) = (0xFF, 0xF5, 0x9B, 0xFF);
+pub const C_ON_PRIMARY: (u8, u8, u8, u8) = (0x0E, 0x0E, 0x43, 0xFF);
+pub const C_SECONDARY: (u8, u8, u8, u8) = (0xA9, 0xAE, 0xFE, 0xFF);
+pub const C_ON_SECONDARY: (u8, u8, u8, u8) = (0x0E, 0x0E, 0x43, 0xFF);
+pub const C_TERTIARY: (u8, u8, u8, u8) = (0x9B, 0xFE, 0xCE, 0xFF);
+pub const C_ERROR: (u8, u8, u8, u8) = (0xFD, 0x46, 0x63, 0xFF);
+pub const C_SURFACE_VARIANT: (u8, u8, u8, u8) = (0x11, 0x11, 0x2D, 0xFF);
+pub const C_ON_SURFACE_VARIANT: (u8, u8, u8, u8) = (0x7C, 0x80, 0xB4, 0xFF);
 
-// ---- Padding (from Caelestia tokens.hpp) ----
-pub const PAD_SM: f32 = 8.0;
-pub const PAD_MD: f32 = 12.0;
+// ---- Bar sizing (from Noctalia Style) ----
+pub const BAR_THICKNESS: f32 = 34.0;
+pub const BAR_RADIUS: f32 = 12.0;
+pub const BAR_PADDING: f32 = 14.0;
+pub const BAR_WIDGET_SPACING: f32 = 6.0;
 
-// ---- Rounding (from Caelestia tokens.hpp) ----
+// ---- Workspace pills (Noctalia proportional design) ----
+pub const WS_BASE_SIZE: f32 = 16.0;
+pub const WS_PILL_H: f32 = WS_BASE_SIZE;
+pub const WS_ACTIVE_SCALE: f32 = 2.2;
+pub const WS_INACTIVE_SCALE: f32 = 1.0;
+pub const WS_PILL_PAD: f32 = WS_BASE_SIZE * 0.6;
+pub const WS_PILL_GAP: f32 = 4.0;
+pub const WS_LABEL_SIZE: f32 = 11.0;
+pub const WS_EMPTY_ALPHA: f32 = 0.55;
+
+// ---- Clock ----
+pub const CLOCK_SIZE: f32 = 14.0;
+
+// ---- Status icons ----
+pub const STATUS_ICON_SIZE: f32 = 16.0;
+pub const STATUS_SPACING: f32 = 6.0;
+
+// ---- Legacy tokens (used by launcher.rs) ----
 pub const RADIUS_SM: f32 = 8.0;
 pub const RADIUS_LG: f32 = 16.0;
 pub const RADIUS_FULL: f32 = 999.0;
-
-// ---- Font Sizes (from Caelestia appearanceconfig.hpp) ----
 pub const FONT_SMALL: f32 = 11.0;
 pub const FONT_SMALLER: f32 = 12.0;
 pub const FONT_NORMAL: f32 = 13.0;
 
-// ---- Bar sizing (from Caelestia BarTokens) ----
-pub const BAR_INNER_W: f32 = 44.0;
-pub const BAR_TOTAL_W: f32 = BAR_INNER_W;
+// ---- Capsule padding (from Noctalia Style::barCapsulePadding) ----
+pub const CAPSULE_PAD: f32 = 6.0;
 
-// ---- Bar layout (from Caelestia Bar.qml) ----
-pub const BAR_MODULE_SPACING: f32 = SPACE_MD;
-pub const BAR_SHOWN_WORKSPACES: usize = 5;
-
-// ---- Workspace sizing ----
-pub const WS_ITEM_H: f32 = BAR_INNER_W - PAD_SM;
-pub const WS_SPACING: f32 = SPACE_XS;
-pub const WS_INDICATOR_W: f32 = BAR_INNER_W - PAD_SM;
-pub const WS_LABEL_SIZE: f32 = 10.0;
-// Must be >= BAR_INNER_W / 2 so the first item clears the parent's RADIUS_FULL curve
-pub const WS_PILL_PAD_V: f32 = BAR_INNER_W / 2.0;
-
-// ---- Clock sizing ----
-pub const CLOCK_SPACING: f32 = SPACE_XS;
-pub const CLOCK_TIME_SIZE: f32 = 8.0;
-pub const CLOCK_DATE_SIZE: f32 = 7.0;
-
-// ---- StatusIcons sizing ----
-pub const STATUS_ICON_SIZE: f32 = 12.0;
-pub const STATUS_SPACING: f32 = SPACE_XS;
-
-// ---- M3 Dark Palette (from Caelestia Colours.qml) ----
-pub const C_M3_SURFACE_CONTAINER: (u8, u8, u8, u8) = (0x26, 0x1D, 0x20, 0xFF);
-pub const C_M3_ON_SURFACE_VARIANT: (u8, u8, u8, u8) = (0xD5, 0xC2, 0xC6, 0xFF);
-pub const C_M3_PRIMARY: (u8, u8, u8, u8) = (0xFF, 0xB0, 0xCA, 0xFF);
-pub const C_M3_ON_PRIMARY: (u8, u8, u8, u8) = (0x54, 0x1D, 0x34, 0xFF);
-pub const C_M3_SECONDARY: (u8, u8, u8, u8) = (0xE2, 0xBD, 0xC7, 0xFF);
-pub const C_M3_TERTIARY: (u8, u8, u8, u8) = (0xF0, 0xBC, 0x95, 0xFF);
-pub const C_M3_ERROR: (u8, u8, u8, u8) = (0xFF, 0xB4, 0xAB, 0xFF);
-
-// ---- Semantic Aliases ----
-pub const C_MODULE_BG: (u8, u8, u8, u8) = C_M3_SURFACE_CONTAINER;
-pub const C_WS_ACTIVE_BG: (u8, u8, u8, u8) = C_M3_PRIMARY;
-pub const C_WS_ACTIVE_TEXT: (u8, u8, u8, u8) = C_M3_ON_PRIMARY;
-pub const C_WS_INACTIVE_TEXT: (u8, u8, u8, u8) = (0xEF, 0xDF, 0xE2, 0xFF);
-pub const C_WS_UNOCCUPIED_TEXT: (u8, u8, u8, u8) = (0x83, 0x73, 0x77, 0xFF);
-pub const C_STATUS_ON: (u8, u8, u8, u8) = C_M3_SECONDARY;
-pub const C_STATUS_OFF: (u8, u8, u8, u8) = C_M3_ON_SURFACE_VARIANT;
-pub const C_CLOCK: (u8, u8, u8, u8) = C_M3_TERTIARY;
-pub const C_POWER: (u8, u8, u8, u8) = C_M3_ERROR;
+// ---- Semantic aliases ----
+pub const C_BAR_BG: (u8, u8, u8, u8) = C_SURFACE;
+pub const C_BAR_TEXT: (u8, u8, u8, u8) = C_ON_SURFACE;
+pub const C_WS_ACTIVE_BG: (u8, u8, u8, u8) = C_PRIMARY;
+pub const C_WS_ACTIVE_TEXT: (u8, u8, u8, u8) = C_ON_PRIMARY;
+pub const C_WS_OCCUPIED_BG: (u8, u8, u8, u8) = C_SECONDARY;
+pub const C_WS_OCCUPIED_TEXT: (u8, u8, u8, u8) = C_ON_SECONDARY;
+pub const C_WS_EMPTY_TEXT: (u8, u8, u8, u8) = C_ON_SURFACE_VARIANT;
+pub const C_STATUS_ON: (u8, u8, u8, u8) = C_ON_SURFACE;
+pub const C_STATUS_OFF: (u8, u8, u8, u8) = C_ON_SURFACE_VARIANT;
+pub const C_CLOCK: (u8, u8, u8, u8) = C_ON_SURFACE;
