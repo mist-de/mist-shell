@@ -31,6 +31,7 @@ fn edgePadding(h: u32) u32 {
 }
 
 fn drawWidgetBg(surface: *rdr.Surface, x: i32, y: i32, w: u32, h: u32) void {
+    if (std.meta.eql(t.bar.item_background, t.bar.background)) return;
     const bg = t.panelColor(t.bar.item_background);
     if (bg.a > 0) {
         surface.fillRect(x, y, w, h, bg);

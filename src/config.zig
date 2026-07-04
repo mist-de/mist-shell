@@ -56,6 +56,10 @@ pub fn getPadding() u16 {
     return global.general.padding;
 }
 
+pub fn getLayoutPadding() u16 {
+    return global_theme.bar.layout_padding;
+}
+
 pub fn isBottom() bool {
     return global.general.position == .bottom;
 }

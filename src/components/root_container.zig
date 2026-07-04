@@ -160,7 +160,7 @@ fn edgePadding(h: u32) u32 {
 }
 
 fn buildHitAreas(self: *RootContainer, clip: Rect) void {
-    const layout_padding: u32 = Config.getPadding();
+    const layout_padding: u32 = Config.getLayoutPadding();
     const inset = verticalInset(clip.height);
     const widget_height = clip.height -| (inset * 2);
     const inner_width = clip.width -| (layout_padding * 2);
@@ -291,10 +291,11 @@ pub fn drawFrame(self: *RootContainer, surface: *rdr.Surface, clip: Rect) void {
     }
 
     if (t.bar.group_background.a > 0 or t.bar.group_border.a > 0) {
-        const layout_padding: u32 = Config.getPadding();
+        const layout_padding: u32 = Config.getLayoutPadding();
         const inner_width = clip.width -| (layout_padding * 2);
         const section_width = inner_width / 3;
         const group_bg = t.panelColor(t.bar.group_background);
+        const radius = t.density.panel_radius;
 
         for ([_]i32{
             @as(i32, @intCast(layout_padding)),
@@ -305,7 +306,11 @@ pub fn drawFrame(self: *RootContainer, surface: *rdr.Surface, clip: Rect) void {
             if (si == 2) gw = @intCast(inner_width -| (section_width * 2));
             if (gw > 0) {
                 if (group_bg.a > 0) {
-                    surface.fillRect(sx, 0, @intCast(gw), clip.height, group_bg);
+                    if (radius > 0) {
+                        surface.fillRoundedRect(sx, 0, @intCast(gw), clip.height, radius, group_bg);
+                    } else {
+                        surface.fillRect(sx, 0, @intCast(gw), clip.height, group_bg);
+                    }
                 }
                 if (t.bar.group_border.a > 0) {
                     surface.fillRect(sx, 0, @intCast(gw), 1, t.bar.group_border);
