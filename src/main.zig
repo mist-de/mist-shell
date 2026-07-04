@@ -1,0 +1,116 @@
+const std = @import("std");
+const posix = std.posix;
+
+const Wayland = @import("wayland.zig");
+const wl = Wayland.wl;
+const Output = @import("output.zig").Output;
+const Config = @import("config.zig");
+const text = @import("shell/render/text.zig");
+const geo = @import("geo.zig");
+
+const log = std.log.scoped(.main);
+
+var global_font: ?text.Font = null;
+
+pub fn getGlobalFont() ?*text.Font {
+    if (global_font) |*f| return f;
+    return null;
+}
+
+pub fn getGlobalSysInfo() ?*anyopaque {
+    return null;
+}
+
+pub fn initGlobalSysInfo() void {}
+
+pub fn getGlobalNetworkManager() ?*anyopaque {
+    return null;
+}
+
+pub fn initGlobalNetworkManager() void {}
+
+pub fn getGlobalMpris() ?*anyopaque {
+    return null;
+}
+
+pub fn initGlobalMpris() void {}
+
+pub fn getGlobalSystemTray() ?*anyopaque {
+    return null;
+}
+
+pub fn initGlobalSystemTray() void {}
+
+pub fn getGlobalPipeWire() ?*anyopaque {
+    return null;
+}
+
+pub fn initGlobalPipeWire() void {}
+
+pub fn getGlobalAlbumArt() ?*anyopaque {
+    return null;
+}
+
+pub fn setGlobalAlbumArt(_: ?*anyopaque, _: u64) void {}
+
+pub fn getGlobalAlbumArtUrlHash() u64 {
+    return 0;
+}
+
+pub fn textSystemProvider() ?*anyopaque {
+    return null;
+}
+
+fn initFont() !text.Font {
+    for ([_][:0]const u8{
+        "/run/current-system/sw/share/X11/fonts/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    }) |path| {
+        const c = struct { extern "c" fn access(p: [*:0]const u8, m: c_int) c_int; };
+        if (c.access(path.ptr, 0) == 0) {
+            return text.Font.init(path, 14);
+        }
+    }
+    return error.FontNotFound;
+}
+
+pub const App = struct {
+    wayland: Wayland,
+
+    fn init(self: *App) !void {
+        try self.wayland.init();
+        global_font = initFont() catch null;
+        Config.initGlobal(std.heap.page_allocator);
+    }
+
+    fn deinit(self: *App) void {
+        self.wayland.deinit();
+        if (global_font) |*f| f.deinit();
+        Config.deinitGlobal();
+    }
+
+    fn run(self: *App) !void {
+        while (self.wayland.running) {
+            _ = self.wayland.display.flush();
+            var fd: [1]posix.pollfd = .{.{ .fd = self.wayland.display.getFd(), .events = posix.POLL.IN, .revents = 0 }};
+            _ = posix.poll(fd[0..], 100) catch break;
+            if (fd[0].revents & (posix.POLL.ERR | posix.POLL.HUP) != 0) break;
+            if (fd[0].revents & posix.POLL.IN != 0) {
+                switch (self.wayland.dispatch()) {
+                    .SUCCESS => {},
+                    .CONNRESET, .INVAL => break,
+                    else => break,
+                }
+            }
+        }
+    }
+};
+
+pub fn main() !void {
+    var app: App = undefined;
+    try app.init();
+    defer app.deinit();
+    try app.run();
+}
