@@ -114,6 +114,8 @@ pub fn outputChanged(self: *Output) !void {
         const surface = try compositor.createSurface();
         self.surface = surface;
 
+        Wayland.setSurfaceTransparent(compositor, surface);
+
         const layer_surface = try layer_shell.getLayerSurface(
             surface,
             self.output_context.output,

@@ -120,6 +120,67 @@ pub const Surface = struct {
         self.fillRect(rect.x, rect.y, rect.width, rect.height, color);
     }
 
+    pub fn fillRoundedRect(self: *Surface, x: i32, y: i32, w: u32, h: u32, radius: u32, color: Color) void {
+        if (radius == 0) {
+            self.fillRect(x, y, w, h, color);
+            return;
+        }
+        const sx = @max(x, 0);
+        const sy = @max(y, 0);
+        const ex = @min(@as(i32, @intCast(self.width)), x + @as(i32, @intCast(w)));
+        const ey = @min(@as(i32, @intCast(self.height)), y + @as(i32, @intCast(h)));
+        const r2 = @as(i32, @intCast(radius * radius));
+        const x_i: i32 = @intCast(x);
+        const y_i: i32 = @intCast(y);
+        const w_i: i32 = @intCast(w);
+        const h_i: i32 = @intCast(h);
+        const r_i: i32 = @intCast(radius);
+        const cx_tl = x_i + r_i;
+        const cy_tl = y_i + r_i;
+        const cx_tr = x_i + w_i - r_i - 1;
+        const cy_tr = cy_tl;
+        const cx_bl = cx_tl;
+        const cy_bl = y_i + h_i - r_i - 1;
+        const cx_br = cx_tr;
+        const cy_br = cy_bl;
+        var row = sy;
+        while (row < ey) : (row += 1) {
+            const line_start = @as(usize, @intCast(row)) * self.stride_pixels;
+            var col = sx;
+            while (col < ex) : (col += 1) {
+                var inside = true;
+                if (row < cy_tl) {
+                    if (col < cx_tl) {
+                        const dx = col - cx_tl;
+                        const dy = row - cy_tl;
+                        if (dx * dx + dy * dy > r2) inside = false;
+                    } else if (col > cx_tr) {
+                        const dx = col - cx_tr;
+                        const dy = row - cy_tr;
+                        if (dx * dx + dy * dy > r2) inside = false;
+                    }
+                } else if (row > cy_bl) {
+                    if (col < cx_bl) {
+                        const dx = col - cx_bl;
+                        const dy = row - cy_bl;
+                        if (dx * dx + dy * dy > r2) inside = false;
+                    } else if (col > cx_br) {
+                        const dx = col - cx_br;
+                        const dy = row - cy_br;
+                        if (dx * dx + dy * dy > r2) inside = false;
+                    }
+                }
+                if (inside) {
+                    self.pixels[line_start + @as(usize, @intCast(col))] = color;
+                }
+            }
+        }
+    }
+
+    pub fn fillRoundedRectLogical(self: *Surface, rect: Rect, radius: u32, color: Color) void {
+        self.fillRoundedRect(rect.x, rect.y, rect.width, rect.height, radius, color);
+    }
+
     pub fn setPixel(self: *Surface, x: i32, y: i32, color: Color) void {
         if (x < 0 or y < 0) return;
         const ux: u32 = @intCast(x);

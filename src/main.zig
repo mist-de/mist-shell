@@ -7,8 +7,14 @@ const Output = @import("output.zig").Output;
 const Config = @import("config.zig");
 const text = @import("shell/render/text.zig");
 const geo = @import("geo.zig");
-const battery = @import("battery.zig");
-const volume = @import("volume.zig");
+const battery = @import("service/battery.zig");
+const volume = @import("service/volume.zig");
+const mpris = @import("service/mpris.zig");
+const network = @import("service/network.zig");
+const sysinfo = @import("service/sysinfo.zig");
+const brightness = @import("service/brightness.zig");
+const power_profiles = @import("service/power_profiles.zig");
+const system_tray = @import("service/system_tray.zig");
 
 const log = std.log.scoped(.main);
 
@@ -87,9 +93,21 @@ pub const App = struct {
         Config.initGlobal(std.heap.page_allocator);
         battery.init();
         volume.init();
+        mpris.init(std.heap.page_allocator);
+        network.init(std.heap.page_allocator);
+        sysinfo.init();
+        brightness.init(std.heap.page_allocator);
+        power_profiles.init(std.heap.page_allocator);
+        system_tray.init(std.heap.page_allocator);
     }
 
     fn deinit(self: *App) void {
+        system_tray.deinit();
+        power_profiles.deinit();
+        brightness.deinit();
+        sysinfo.deinit();
+        network.deinit();
+        mpris.deinit();
         volume.deinit();
         battery.deinit();
         self.wayland.deinit();
@@ -102,36 +120,50 @@ pub const App = struct {
         while (self.wayland.running) {
             _ = self.wayland.display.flush();
 
-            var fds: [2]posix.pollfd = undefined;
-            var nfds: usize = 1;
-            fds[0] = .{ .fd = self.wayland.display.getFd(), .events = posix.POLL.IN, .revents = 0 };
+            var fds: [16]posix.pollfd = undefined;
+            var nfds: usize = 0;
 
-            const battery_fd = battery.getFd();
-            var battery_fd_index: ?usize = null;
-            if (battery_fd >= 0) {
-                battery_fd_index = nfds;
-                fds[nfds] = .{ .fd = battery_fd, .events = posix.POLL.IN, .revents = 0 };
-                nfds += 1;
+            fds[nfds] = .{ .fd = self.wayland.display.getFd(), .events = posix.POLL.IN, .revents = 0 };
+            nfds += 1;
+
+            inline for (.{
+                battery, mpris, network, power_profiles, system_tray,
+            }) |svc| {
+                const fd = svc.getFd();
+                if (fd >= 0) {
+                    fds[nfds] = .{ .fd = fd, .events = posix.POLL.IN, .revents = 0 };
+                    nfds += 1;
+                }
             }
 
             _ = posix.poll(fds[0..nfds], 100) catch break;
 
             if (fds[0].revents & (posix.POLL.ERR | posix.POLL.HUP) != 0) break;
 
-            if (battery_fd_index) |idx| {
-                if (fds[idx].revents & posix.POLL.IN != 0) {
-                    battery.process();
-                    for (self.wayland.outputs[0..self.wayland.output_count]) |*output| {
-                        output.full_redraw = true;
-                        output.requestFrame();
+            // Process D-Bus FDs
+            var fd_idx: usize = 1;
+            inline for (.{
+                battery, mpris, network, power_profiles, system_tray,
+            }) |svc| {
+                if (svc.getFd() >= 0) {
+                    if (fds[fd_idx].revents & posix.POLL.IN != 0) {
+                        svc.process();
+                        for (self.wayland.outputs[0..self.wayland.output_count]) |*output| {
+                            output.full_redraw = true;
+                            output.requestFrame();
+                        }
                     }
+                    fd_idx += 1;
                 }
             }
 
-            // Periodic volume refresh (~5 seconds)
+            // Periodic refresh (~5 seconds)
             poll_count += 1;
             if (poll_count % 50 == 0) {
                 volume.refresh();
+                network.refresh();
+                sysinfo.poll();
+                brightness.refresh();
                 for (self.wayland.outputs[0..self.wayland.output_count]) |*output| {
                     output.full_redraw = true;
                     output.requestFrame();

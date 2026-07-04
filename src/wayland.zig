@@ -102,7 +102,7 @@ pub fn init(self: *Wayland) !void {
     registry.setListener(*Wayland, registryListener, self);
     _ = display.roundtrip();
 
-    workspace.detect(self);
+    workspace.init(self);
 
     if (self.compositor == null) return error.NoCompositor;
     if (self.shm == null) return error.NoShm;
@@ -117,6 +117,12 @@ pub fn deinit(self: *Wayland) void {
     }
     self.registry.destroy();
     self.display.disconnect();
+}
+
+pub fn setSurfaceTransparent(compositor: *wl.Compositor, surface: *wl.Surface) void {
+    const region = compositor.createRegion() catch return;
+    defer region.destroy();
+    surface.setOpaqueRegion(region);
 }
 
 pub fn dispatch(self: *Wayland) std.posix.E {

@@ -49,8 +49,8 @@ pub fn refresh() void {
 
 pub fn setVolume(delta: i8) void {
     var buf: [256]u8 = undefined;
-    const sign = if (delta >= 0) "+" else "";
-    const cmd = std.fmt.bufPrintZ(&buf, "wpctl set-volume @DEFAULT_AUDIO_SINK@ {s}{d}%", .{ sign, @abs(delta) }) catch return;
+    const sign: []const u8 = if (delta >= 0) "+" else "-";
+    const cmd = std.fmt.bufPrintZ(&buf, "wpctl set-volume @DEFAULT_AUDIO_SINK@ {d}%{s}", .{ @as(u8, @intCast(@abs(delta))), sign }) catch return;
     _ = c.system(cmd);
     refresh();
 }

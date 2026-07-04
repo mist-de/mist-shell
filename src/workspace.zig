@@ -18,35 +18,55 @@ const Backend = enum {
 pub const TagState = struct {
     active: u32 = 0,
     urgent: u32 = 0,
-    tag_count: u8 = 5,
+    tag_count: u8 = 9,
 };
 
 pub var tag_state: TagState = .{};
 var backend: Backend = .none;
+var wayland: *Wayland = undefined;
 
-pub fn detect(wayland: *Wayland) void {
-    if (wayland.dwl_ipc_manager != null) {
+pub fn init(wayland_ptr: *Wayland) void {
+    wayland = wayland_ptr;
+    detect(wayland_ptr);
+}
+
+fn detect(wl_ptr: *Wayland) void {
+    if (wl_ptr.dwl_ipc_manager != null) {
         backend = .dwl_ipc;
+        tag_state.tag_count = 9;
         log.info("backend: dwl-ipc (MangoWM)", .{});
-    } else if (wayland.ext_workspace_manager != null) {
+    } else if (wl_ptr.ext_workspace_manager != null) {
         backend = .ext_workspace;
         log.info("backend: ext-workspace (Niri)", .{});
     } else {
         backend = .external;
+        tag_state.tag_count = 5;
         log.info("backend: external CLI (River)", .{});
     }
 }
 
 pub fn switchToTag(tag: u8) void {
-    const system = struct { extern "c" fn system(cmd: [*:0]const u8) c_int; };
-    var buf: [128]u8 = undefined;
-    const mask = @as(u32, 1) << @as(u5, @intCast(tag));
-    const cmd = std.fmt.bufPrintZ(
-        &buf,
-        "riverctl set-focused-tags {d} 2>/dev/null || wlrctl workspace {d} 2>/dev/null",
-        .{ mask, tag + 1 },
-    ) catch return;
-    _ = system.system(cmd);
+    switch (backend) {
+        .dwl_ipc => {
+            const mask = @as(u32, 1) << @as(u5, @intCast(tag));
+            for (wayland.dwl_ipc_outputs, 0..) |maybe_out, idx| {
+                if (idx >= wayland.output_count) break;
+                if (maybe_out) |out| {
+                    out.setTags(mask, 0);
+                    _ = wayland.display.flush();
+                }
+            }
+        },
+        .ext_workspace => {},
+        .external => {
+            const system = struct { extern "c" fn system(cmd: [*:0]const u8) c_int; };
+            var buf: [128]u8 = undefined;
+            const mask = @as(u32, 1) << @as(u5, @intCast(tag));
+            const cmd = std.fmt.bufPrintZ(&buf, "riverctl set-focused-tags {d} 2>/dev/null || wlrctl workspace {d} 2>/dev/null", .{ mask, tag + 1 }) catch return;
+            _ = system.system(cmd);
+        },
+        .none => {},
+    }
 }
 
 pub fn onDwlTags(amount: u32) void {
