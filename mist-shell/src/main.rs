@@ -35,25 +35,78 @@ use crate::state::{BarSurface, LauncherSurface, State, Tag};
 type CmdTx = channel::Sender<(u64, serde_json::Value)>;
 type CmdRx = Channel<(u64, serde_json::Value)>;
 
+fn auto_detect_vulkan_icd() {
+    if std::env::var_os("VK_ICD_FILENAMES").is_some() {
+        return;
+    }
+    let icd_dir = std::path::Path::new("/usr/share/vulkan/icd.d");
+    let dir = match std::fs::read_dir(icd_dir) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    let mut candidates: Vec<(u8, std::path::PathBuf)> = Vec::new();
+    for entry in dir.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let name = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
+        let priority: u8 = if name.contains("radeon") || name.contains("radv") {
+            30  // RADV is preferred
+        } else if name.contains("amd") || name.contains("pro") {
+            20
+        } else if name.contains("intel") || name.contains("anv") {
+            25
+        } else if name.contains("virtio") || name.contains("lvp") {
+            10
+        } else {
+            5
+        };
+        candidates.push((priority, path));
+    }
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    if let Some((_, path)) = candidates.into_iter().next() {
+        let p = path.to_string_lossy().to_string();
+        eprintln!("[mist] auto-detected vulkan icd: {p}");
+        unsafe { std::env::set_var("VK_ICD_FILENAMES", &p); }
+    }
+}
+
 fn main() {
+    if std::env::args().any(|a| a == "--help" || a == "-h") {
+        eprintln!("Mist Shell v{}", env!("CARGO_PKG_VERSION"));
+        eprintln!("Usage: mist-shell [--debug] [--help]");
+        eprintln!("  --debug   Enable verbose debug logging");
+        eprintln!("  --help    Show this help and exit");
+        eprintln!();
+        eprintln!("Environment:");
+        eprintln!("  MIST_DEBUG=1          Enable debug logging (same as --debug)");
+        eprintln!("  XDG_CONFIG_HOME/mist/config.toml  Configuration file");
+        eprintln!("  WAYLAND_DISPLAY       Wayland compositor socket");
+        std::process::exit(0);
+    }
     if std::env::args().any(|a| a == "--debug") {
         unsafe { std::env::set_var("MIST_DEBUG", "1"); }
     }
 
     eprintln!("[mist] starting up...");
+    eprintln!("[mist] version {}", env!("CARGO_PKG_VERSION"));
+    eprintln!("[mist] debug={}", std::env::var("MIST_DEBUG").unwrap_or_default());
+
+    auto_detect_vulkan_icd();
 
     use std::panic;
     let prev = panic::take_hook();
     panic::set_hook(Box::new(move |info| {
-        eprintln!("PANIC: {}", info);
+        eprintln!("[mist] PANIC: {}", info);
         prev(info);
     }));
 
     let conn = match Connection::connect_to_env() {
         Ok(c) => c,
-        Err(e) => { eprintln!("WAYLAND CONNECT: {:?}", e); std::process::exit(1); }
+        Err(e) => { eprintln!("[mist] FATAL: Wayland connect: {:?}", e); std::process::exit(1); }
     };
-    eprintln!("[mist] connected to wayland");
+    eprintln!("[mist] wayland connected (display={:?})", conn.backend().display_id());
     let (globals, mut eq) = match registry_queue_init::<State>(&conn) {
         Ok(g) => g,
         Err(e) => { eprintln!("REGISTRY INIT: {:?}", e); std::process::exit(1); }
@@ -79,12 +132,9 @@ fn main() {
 
     // Initialize wgpu
     let gpu_instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::VULKAN | wgpu::Backends::METAL | wgpu::Backends::DX12 | wgpu::Backends::GL,
+        backends: wgpu::Backends::all(),
         flags: wgpu::InstanceFlags::default(),
-        memory_budget_thresholds: wgpu::MemoryBudgetThresholds {
-            for_resource_creation: Some(80),
-            for_device_loss: Some(90),
-        },
+        memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
         backend_options: wgpu::BackendOptions::from_env_or_default(),
         display: None,
     });
@@ -105,7 +155,7 @@ fn main() {
     }.expect("create wgpu surface");
 
     let adapter = pollster::block_on(gpu_instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::LowPower,
+        power_preference: wgpu::PowerPreference::HighPerformance,
         compatible_surface: Some(&bar_wgpu_surface),
         force_fallback_adapter: false,
     })).expect("Failed to find a suitable GPU adapter");
@@ -189,7 +239,7 @@ fn main() {
         compositor_type: ct,
         clock: String::new(), date: String::new(),
         workspaces: (1..=9).map(|i| (i.to_string(), Tag::default())).collect(),
-        font: crate::text::init_font_system(), swash: cosmic_text::SwashCache::new(),
+        font: crate::text::init_font_system(), font_cache: crate::text::FontCache::new(),
         xkb_ctx: None, xkb_state: None,
         config,
         status: crate::status::SystemStatus::default(),

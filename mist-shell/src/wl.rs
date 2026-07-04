@@ -316,6 +316,7 @@ impl Dispatch<WlKeyboard, ()> for State {
 }
 
 fn in_search_bar(px: f32, py: f32, pw: f32, ph: f32, sx: f32, sy: f32) -> bool {
+    // compute_panel with anim_scale=1.0 since we're just checking hit targets
     let pad = 12.0;
     let search_h = 42.0;
     let search_x = px + pad;
@@ -390,18 +391,12 @@ impl Dispatch<WlPointer, ()> for State {
                                 let (sx, sy) = (state.pointer_x as f32, state.pointer_y as f32);
                                 if std::env::var("MIST_DEBUG").map(|v| v == "1").unwrap_or(false) { eprintln!("[mist] click sx={:.1} sy={:.1} panel=({:.0},{:.0} {:.0}x{:.0})", sx, sy, px, py, pw, ph); }
                                 if sx >= px && sx <= px + pw && sy >= py && sy <= py + ph {
-                                    let pad = 12.0;
-                                    let search_h = 42.0;
-                                    let item_h = 38.0;
-                                    let start_y = py + pad;
-                                    let search_y = py + ph - pad - search_h;
-                                    let div_y = search_y - 10.0;
-                                    let max_visible = ((div_y - 10.0 - start_y) / item_h).max(1.0) as usize;
-                                    let rel_y = sy - start_y;
-                                    if std::env::var("MIST_DEBUG").map(|v| v == "1").unwrap_or(false) { eprintln!("[mist] click in panel rel_y={:.1} div_y={:.1} max_visible={}", rel_y, div_y, max_visible); }
-                                    if rel_y >= 0.0 && sy < div_y {
-                                        let row = (rel_y / item_h) as usize;
-                                        if row < max_visible {
+                                    let lay = crate::launcher::compute_panel(state.launcher.w as f32, state.launcher.h as f32, 1.0);
+                                    let rel_y = sy - lay.start_y;
+                                    if std::env::var("MIST_DEBUG").map(|v| v == "1").unwrap_or(false) { eprintln!("[mist] click in panel rel_y={:.1} div_y={:.1} max_visible={}", rel_y, lay.div_y, lay.max_visible); }
+                                    if rel_y >= 0.0 && sy < lay.div_y {
+                                        let row = (rel_y / lay.item_h) as usize;
+                                        if row < lay.max_visible {
                                             let idx = state.launcher.scroll_offset + row;
                                             if state.launcher.view != crate::launcher::LauncherView::AppList {
                                                 if let Some(&act_idx) = state.launcher.matching_actions.get(idx)

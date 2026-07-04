@@ -1,7 +1,8 @@
 use std::collections::HashMap;
+use std::time::Instant;
 
 use crate::ease::AnimState;
-use std::time::Instant;
+use crate::text::FontCache;
 
 use vello::Scene;
 use wayland_client::protocol::wl_compositor::WlCompositor;
@@ -98,7 +99,7 @@ pub struct State {
     pub date: String,
     pub workspaces: WsList,
     pub font: cosmic_text::FontSystem,
-    pub swash: cosmic_text::SwashCache,
+    pub font_cache: FontCache,
     pub xkb_ctx: Option<xkb::Context>,
     pub xkb_state: Option<xkb::State>,
     pub config: crate::config::MistConfig,
@@ -187,6 +188,7 @@ impl State {
         let mut encoder = self.gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("mist-bar-blit") });
         blitter.copy(&self.gpu_device, &mut encoder, intermediate_view, &output_view);
         self.gpu_queue.submit(std::iter::once(encoder.finish()));
+        self.bar.surface.frame(&self.qh, BarCb);
         output.present();
         self.bar.frame_pending = true;
         let _ = self.conn.flush();
@@ -236,6 +238,9 @@ impl State {
         let mut encoder = self.gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("mist-launcher-blit") });
         blitter.copy(&self.gpu_device, &mut encoder, intermediate_view, &output_view);
         self.gpu_queue.submit(std::iter::once(encoder.finish()));
+        if let Some(ref surface) = self.launcher.surface {
+            surface.frame(&self.qh, LauncherCb);
+        }
         output.present();
         self.launcher.frame_pending = true;
         let _ = self.conn.flush();
@@ -361,34 +366,26 @@ impl State {
     }
 
     pub fn ensure_selection_visible(&mut self) {
-        let h = self.launcher.h as f32;
-        let panel_h = (h * 0.65).clamp(240.0, 560.0);
-        let pad = 12.0;
-        let search_h = 42.0;
-        let max_visible = ((panel_h - 2.0 * pad - search_h - 20.0) / 38.0).max(1.0) as usize;
-        if max_visible == 0 { return }
+        let lay = launcher::compute_panel(self.launcher.w as f32, self.launcher.h as f32, 1.0);
+        if lay.max_visible == 0 { return }
         let sel = self.launcher.selection;
         let scroll = &mut self.launcher.scroll_offset;
         if sel < *scroll {
             *scroll = sel;
-        } else if sel >= *scroll + max_visible {
-            *scroll = sel.saturating_sub(max_visible - 1);
+        } else if sel >= *scroll + lay.max_visible {
+            *scroll = sel.saturating_sub(lay.max_visible - 1);
         }
     }
 
     pub fn scroll_launcher(&mut self, delta: i32) {
         if delta == 0 { return }
         let old_offset = self.launcher.scroll_offset;
-        let h = self.launcher.h as f32;
-        let panel_h = (h * 0.65).clamp(240.0, 560.0);
-        let pad = 12.0;
-        let search_h = 42.0;
-        let max_visible = ((panel_h - 2.0 * pad - search_h - 20.0) / 38.0).max(1.0) as usize;
+        let lay = launcher::compute_panel(self.launcher.w as f32, self.launcher.h as f32, 1.0);
         let len = match self.launcher.view {
             launcher::LauncherView::ActionList | launcher::LauncherView::CalcResult => self.launcher.matching_actions.len(),
             launcher::LauncherView::AppList => self.launcher.matching.len(),
         };
-        let max_scroll = len.saturating_sub(max_visible);
+        let max_scroll = len.saturating_sub(lay.max_visible);
         if delta > 0 {
             self.launcher.scroll_offset = self.launcher.scroll_offset.saturating_add(delta as usize).min(max_scroll);
         } else {

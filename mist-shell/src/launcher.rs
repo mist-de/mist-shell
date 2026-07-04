@@ -10,6 +10,7 @@ use vello::Scene;
 use crate::render::{color, fill_rect, fill_rounded_rect, stroke_rounded_rect};
 use crate::state::State;
 use crate::text::render_text;
+use crate::tokens::*;
 
 macro_rules! log_debug {
     ($($arg:tt)*) => {
@@ -258,30 +259,54 @@ pub fn find_icon_path(name: &str, size: u32) -> Option<String> {
     None
 }
 
+fn load_svg_icon(path: &str, target_size: u32) -> Option<ImageData> {
+    let svg_data = std::fs::read(path).ok()?;
+    let opt = resvg::usvg::Options::default();
+    let rtree = resvg::usvg::Tree::from_data(&svg_data, &opt).ok()?;
+    let size = rtree.size();
+    let target = target_size as f32;
+    let scale = target / size.width().max(size.height()).max(1.0);
+    let w = (size.width() * scale).ceil().max(1.0) as u32;
+    let h = (size.height() * scale).ceil().max(1.0) as u32;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(w, h)?;
+    let ts = resvg::tiny_skia::Transform::from_scale(scale, scale);
+    resvg::render(&rtree, ts, &mut pixmap.as_mut());
+    Some(ImageData {
+        data: Blob::from(pixmap.data().to_vec()),
+        format: ImageFormat::Rgba8,
+        alpha_type: ImageAlphaType::Alpha,
+        width: pixmap.width(),
+        height: pixmap.height(),
+    })
+}
+
+fn load_png_icon(path: &str) -> Option<ImageData> {
+    let img = image::ImageReader::open(path).ok()?;
+    let rgba = img.decode().ok()?.into_rgba8();
+    let (w, h) = rgba.dimensions();
+    let data: Vec<u8> = rgba.into_raw();
+    Some(ImageData {
+        data: Blob::from(data),
+        format: ImageFormat::Rgba8,
+        alpha_type: ImageAlphaType::Alpha,
+        width: w,
+        height: h,
+    })
+}
+
 pub fn load_app_icon<'a>(cache: &'a mut HashMap<String, ImageData>, icon_name: &str) -> Option<&'a ImageData> {
     if icon_name.is_empty() { return None }
-    // Check cache first
     if cache.contains_key(icon_name) {
         return cache.get(icon_name);
     }
-    // Find and load the icon
     let path = find_icon_path(icon_name, 28)?;
-    if let Ok(img) = image::ImageReader::open(&path) {
-        if let Ok(rgba) = img.decode().map(|i| i.into_rgba8()) {
-            let (w, h) = rgba.dimensions();
-            let data: Vec<u8> = rgba.into_raw();
-            let image_data = ImageData {
-                data: Blob::from(data),
-                format: ImageFormat::Rgba8,
-                alpha_type: ImageAlphaType::Alpha,
-                width: w,
-                height: h,
-            };
-            cache.insert(icon_name.to_string(), image_data);
-            return cache.get(icon_name);
-        }
-    }
-    None
+    let image_data = if path.ends_with(".svg") {
+        load_svg_icon(&path, 28)
+    } else {
+        load_png_icon(&path)
+    }?;
+    cache.insert(icon_name.to_string(), image_data);
+    cache.get(icon_name)
 }
 
 fn draw_icon(scene: &mut Scene, x: f32, y: f32, size: f32, image_data: &ImageData) {
@@ -330,9 +355,9 @@ fn strip_field_codes(exec: &str) -> String {
         if bytes[i] == b'%' && i + 1 < bytes.len() {
             match bytes[i + 1] {
                 b'f' | b'F' | b'u' | b'U' | b'd' | b'D' | b'n' | b'N' | b'i' | b'c' | b'k' => {
-                    i += 1; // skip the letter
+                    i += 1;
                     if i + 1 < bytes.len() && bytes[i + 1] == b' ' {
-                        i += 1; // skip trailing space
+                        i += 1;
                     }
                     i += 1;
                     continue;
@@ -358,12 +383,8 @@ fn tokenize(cmd: &str) -> Vec<String> {
     let mut in_double = false;
     for c in cmd.chars() {
         match c {
-            '\'' if !in_double => {
-                in_single = !in_single;
-            }
-            '"' if !in_single => {
-                in_double = !in_double;
-            }
+            '\'' if !in_double => { in_single = !in_single; }
+            '"' if !in_single => { in_double = !in_double; }
             ' ' if !in_single && !in_double => {
                 if !current.is_empty() {
                     args.push(std::mem::take(&mut current));
@@ -416,16 +437,8 @@ fn parse_desktop(path: &Path) -> Option<App> {
     let exec = exec?;
     let exec = strip_field_codes(&exec);
     let app = App {
-        id,
-        name: name?,
-        exec: exec.trim().to_string(),
-        icon,
-        comment,
-        generic_name: generic,
-        categories,
-        startup_wm_class,
-        working_dir,
-        terminal,
+        id, name: name?, exec: exec.trim().to_string(), icon, comment,
+        generic_name: generic, categories, startup_wm_class, working_dir, terminal,
     };
     log_debug!("parse_desktop: name=\"{}\" exec=\"{}\" categories={:?} wm=\"{}\" terminal={}", app.name, app.exec, app.categories, app.startup_wm_class, app.terminal);
     Some(app)
@@ -473,6 +486,33 @@ pub fn launch_desktop_app(app: &App, activation_token: Option<&str>) {
     }
 }
 
+pub struct PanelLayout {
+    pub px: f32, pub py: f32,
+    pub pw: f32, pub ph: f32,
+    pub pad: f32,
+    pub search_h: f32,
+    pub item_h: f32,
+    pub start_y: f32,
+    pub search_y: f32,
+    pub div_y: f32,
+    pub max_visible: usize,
+}
+
+pub fn compute_panel(w: f32, h: f32, anim_scale: f32) -> PanelLayout {
+    let pw = ((w * 0.5).clamp(300.0, 600.0)) * anim_scale;
+    let ph = ((h * 0.65).clamp(240.0, 560.0)) * anim_scale;
+    let px = (w - pw) / 2.0;
+    let py = (h - ph) / 2.0;
+    let pad = 12.0;
+    let search_h = 42.0;
+    let search_y = py + ph - pad - search_h;
+    let div_y = search_y - 10.0;
+    let start_y = py + pad;
+    let item_h = 38.0;
+    let max_visible = ((div_y - 10.0 - start_y) / item_h).max(1.0) as usize;
+    PanelLayout { px, py, pw, ph, pad, search_h, item_h, start_y, search_y, div_y, max_visible }
+}
+
 pub fn render_launcher(state: &mut State) -> (Scene, (f32, f32, f32, f32)) {
     let w = state.launcher.w.max(1) as u32;
     let h = state.launcher.h.max(1) as u32;
@@ -486,35 +526,25 @@ pub fn render_launcher(state: &mut State) -> (Scene, (f32, f32, f32, f32)) {
     };
     let anim_scale = 0.85 + 0.15 * anim_value;
 
-    let panel_w = ((w as f32 * 0.5).clamp(300.0, 600.0)) * anim_scale;
-    let panel_h = ((h as f32 * 0.65).clamp(240.0, 560.0)) * anim_scale;
-    let px = (w as f32 - panel_w) / 2.0;
-    let py = (h as f32 - panel_h) / 2.0;
-    let pad = 12.0;
-    let search_h = 42.0;
-    let search_y = py + panel_h - pad - search_h;
-    let div_y = search_y - 10.0;
-    let start_y = py + pad;
-    let item_h = 38.0;
-    let max_visible = ((div_y - 10.0 - start_y) / item_h).max(1.0) as usize;
+    let lay = compute_panel(w as f32, h as f32, anim_scale);
 
     let mut scene = Scene::new();
 
     let bg_alpha = (0xC8 as f32 * anim_value) as u8;
     let border_alpha = (0x12 as f32 * anim_value) as u8;
-    fill_rounded_rect(&mut scene, px, py, panel_w, panel_h, 18.0, color((0x1E, 0x1E, 0x2E, bg_alpha)));
-    stroke_rounded_rect(&mut scene, px, py, panel_w, panel_h, 18.0, 1.0, color((0xCD, 0xD6, 0xF4, border_alpha)));
+    fill_rounded_rect(&mut scene, lay.px, lay.py, lay.pw, lay.ph, RADIUS_LG, color((0x26, 0x1D, 0x20, bg_alpha)));
+    stroke_rounded_rect(&mut scene, lay.px, lay.py, lay.pw, lay.ph, RADIUS_LG, 1.5, color((0x51, 0x43, 0x47, border_alpha)));
 
-    let search_x = px + pad;
-    let search_w = panel_w - pad * 2.0;
+    let search_x = lay.px + lay.pad;
+    let search_w = lay.pw - lay.pad * 2.0;
 
-    fill_rounded_rect(&mut scene, search_x, search_y, search_w, search_h, 21.0, color((0x31, 0x32, 0x44, 0xE6)));
+    fill_rounded_rect(&mut scene, search_x, lay.search_y, search_w, lay.search_h, RADIUS_FULL, color((0x31, 0x28, 0x2A, 0xE6)));
 
-    render_text(&mut scene, &mut state.font, &mut state.swash, ">", search_x + 14.0, search_y + 12.0, 14.0, CosmicColor::rgba(0x6C, 0x70, 0x86, 0xFF));
+    render_text(&mut scene, &mut state.font_cache, &mut state.font, ">", search_x + 14.0, lay.search_y + 12.0, FONT_NORMAL, CosmicColor::rgba(0xD5, 0xC2, 0xC6, 0xFF), "GoogleSansFlex");
 
     let text_x = search_x + 14.0 + 10.0;
     if state.launcher.query.is_empty() {
-        render_text(&mut scene, &mut state.font, &mut state.swash, "  Search apps or type \">\" for commands...", text_x, search_y + 12.0, 14.0, CosmicColor::rgba(0x6C, 0x70, 0x86, 0xFF));
+        render_text(&mut scene, &mut state.font_cache, &mut state.font, "  Search apps or type \">\" for commands...", text_x, lay.search_y + 12.0, FONT_NORMAL, CosmicColor::rgba(0xD5, 0xC2, 0xC6, 0xFF), "GoogleSansFlex");
     } else {
         let cursor_visible = (state.launcher.start_time.elapsed().as_millis() / 500).is_multiple_of(2);
         let display = if cursor_visible {
@@ -524,86 +554,89 @@ pub fn render_launcher(state: &mut State) -> (Scene, (f32, f32, f32, f32)) {
         } else {
             state.launcher.query.clone()
         };
-        render_text(&mut scene, &mut state.font, &mut state.swash, &display, text_x, search_y + 12.0, 14.0, CosmicColor::rgba(0xCD, 0xD6, 0xF4, 0xFF));
+        render_text(&mut scene, &mut state.font_cache, &mut state.font, &display, text_x, lay.search_y + 12.0, FONT_NORMAL, CosmicColor::rgba(0xEF, 0xDF, 0xE2, 0xFF), "GoogleSansFlex");
     }
 
-    fill_rect(&mut scene, px + pad, div_y, panel_w - pad * 2.0, 1.0, color((0x36, 0x3A, 0x4F, 0xFF)));
+    fill_rect(&mut scene, lay.px + lay.pad, lay.div_y, lay.pw - lay.pad * 2.0, 1.0, color((0x36, 0x3A, 0x4F, 0xFF)));
 
     state.launcher.dirty = false;
 
     match state.launcher.view {
         LauncherView::CalcResult => {
             if let Some(ref calc_res) = state.launcher.calc_result {
-                let iy = start_y;
+                let iy = lay.start_y;
                 if state.launcher.selection == 0 {
-                    fill_rounded_rect(&mut scene, px + 6.0, iy, panel_w - 12.0, item_h - 4.0, 8.0, color((0x7A, 0xA2, 0xF7, 0x33)));
+                    fill_rounded_rect(&mut scene, lay.px + 6.0, iy, lay.pw - 12.0, lay.item_h - 4.0, 8.0, color((0x7A, 0xA2, 0xF7, 0x33)));
                 }
-                render_text(&mut scene, &mut state.font, &mut state.swash, "\u{f8c9}", px + 16.0, iy + 10.0, 14.0, CosmicColor::rgba(0x7A, 0xA2, 0xF7, 0xFF));
-                render_text(&mut scene, &mut state.font, &mut state.swash, " = ", px + 36.0, iy + 10.0, 13.0, CosmicColor::rgba(0xCD, 0xD6, 0xF4, 0xFF));
-                render_text(&mut scene, &mut state.font, &mut state.swash, &state.launcher.query, px + 56.0, iy + 10.0, 13.0, CosmicColor::rgba(0x6C, 0x70, 0x86, 0xFF));
-                render_text(&mut scene, &mut state.font, &mut state.swash, calc_res, px + 56.0, iy + 26.0, 11.0, CosmicColor::rgba(0xA6, 0xDA, 0x95, 0xFF));
+                        render_text(&mut scene, &mut state.font_cache, &mut state.font, "\u{f8c9}", lay.px + 16.0, iy + 10.0, FONT_NORMAL, CosmicColor::rgba(0x7A, 0xA2, 0xF7, 0xFF), "GoogleSansFlex");
+                        render_text(&mut scene, &mut state.font_cache, &mut state.font, " = ", lay.px + 36.0, iy + 10.0, FONT_SMALLER, CosmicColor::rgba(0xEF, 0xDF, 0xE2, 0xFF), "GoogleSansFlex");
+                        render_text(&mut scene, &mut state.font_cache, &mut state.font, &state.launcher.query, lay.px + 56.0, iy + 10.0, FONT_SMALLER, CosmicColor::rgba(0x6C, 0x70, 0x86, 0xFF), "GoogleSansFlex");
+                        render_text(&mut scene, &mut state.font_cache, &mut state.font, calc_res, lay.px + 56.0, iy + 26.0, FONT_SMALL, CosmicColor::rgba(0xA6, 0xDA, 0x95, 0xFF), "GoogleSansFlex");
+
                 let start = state.launcher.scroll_offset.min(state.launcher.matching_actions.len().saturating_sub(1));
-                let end = (start + max_visible.saturating_sub(1)).min(state.launcher.matching_actions.len());
+                let end = (start + lay.max_visible.saturating_sub(1)).min(state.launcher.matching_actions.len());
                 for (rel_i, &act_idx) in state.launcher.matching_actions[start..end].iter().enumerate() {
-                    let iy = start_y + (rel_i + 1) as f32 * item_h;
+                    let iy = lay.start_y + (rel_i + 1) as f32 * lay.item_h;
                     if start + rel_i + 1 == state.launcher.selection {
-                        fill_rounded_rect(&mut scene, px + 6.0, iy, panel_w - 12.0, item_h - 4.0, 8.0, color((0xCD, 0xD6, 0xF4, 0x12)));
+                        fill_rounded_rect(&mut scene, lay.px + 6.0, iy, lay.pw - 12.0, lay.item_h - 4.0, RADIUS_SM, color((0xEF, 0xDF, 0xE2, 0x1A)));
                     }
                     if let Some(act) = state.launcher.actions.get(act_idx) {
-                        render_text(&mut scene, &mut state.font, &mut state.swash, ">", px + 16.0, iy + 10.0, 14.0, CosmicColor::rgba(0x6C, 0x70, 0x86, 0xFF));
-                        render_text(&mut scene, &mut state.font, &mut state.swash, act.name, px + 36.0, iy + 10.0, 13.0, CosmicColor::rgba(0xCD, 0xD6, 0xF4, 0xFF));
-                        render_text(&mut scene, &mut state.font, &mut state.swash, act.description, px + 36.0, iy + 26.0, 11.0, CosmicColor::rgba(0x6C, 0x70, 0x86, 0xFF));
+                        render_text(&mut scene, &mut state.font_cache, &mut state.font, ">", lay.px + 16.0, iy + 10.0, FONT_NORMAL, CosmicColor::rgba(0xD5, 0xC2, 0xC6, 0xFF), "GoogleSansFlex");
+                        render_text(&mut scene, &mut state.font_cache, &mut state.font, act.name, lay.px + 36.0, iy + 10.0, FONT_SMALLER, CosmicColor::rgba(0xEF, 0xDF, 0xE2, 0xFF), "GoogleSansFlex");
+                        render_text(&mut scene, &mut state.font_cache, &mut state.font, act.description, lay.px + 36.0, iy + 26.0, FONT_SMALL, CosmicColor::rgba(0xD5, 0xC2, 0xC6, 0xFF), "GoogleSansFlex");
                     }
                 }
             }
         }
         LauncherView::ActionList => {
             let start = state.launcher.scroll_offset.min(state.launcher.matching_actions.len().saturating_sub(1));
-            let end = (start + max_visible).min(state.launcher.matching_actions.len());
+            let end = (start + lay.max_visible).min(state.launcher.matching_actions.len());
             for (rel_i, &act_idx) in state.launcher.matching_actions[start..end].iter().enumerate() {
-                let iy = start_y + rel_i as f32 * item_h;
-                if start + rel_i == state.launcher.selection {
-                    fill_rounded_rect(&mut scene, px + 6.0, iy, panel_w - 12.0, item_h - 4.0, 8.0, color((0xCD, 0xD6, 0xF4, 0x12)));
-                }
-                if let Some(act) = state.launcher.actions.get(act_idx) {
-                    render_text(&mut scene, &mut state.font, &mut state.swash, ">", px + 16.0, iy + 10.0, 14.0, CosmicColor::rgba(0x6C, 0x70, 0x86, 0xFF));
-                    render_text(&mut scene, &mut state.font, &mut state.swash, act.name, px + 36.0, iy + 10.0, 13.0, CosmicColor::rgba(0xCD, 0xD6, 0xF4, 0xFF));
-                    render_text(&mut scene, &mut state.font, &mut state.swash, act.description, px + 36.0, iy + 26.0, 11.0, CosmicColor::rgba(0x6C, 0x70, 0x86, 0xFF));
-                }
+                let iy = lay.start_y + rel_i as f32 * lay.item_h;
+                    if start + rel_i == state.launcher.selection {
+                        fill_rounded_rect(&mut scene, lay.px + 6.0, iy, lay.pw - 12.0, lay.item_h - 4.0, RADIUS_SM, color((0xEF, 0xDF, 0xE2, 0x1A)));
+                    }
+                    if let Some(act) = state.launcher.actions.get(act_idx) {
+                        render_text(&mut scene, &mut state.font_cache, &mut state.font, ">", lay.px + 16.0, iy + 10.0, FONT_NORMAL, CosmicColor::rgba(0xD5, 0xC2, 0xC6, 0xFF), "GoogleSansFlex");
+                        render_text(&mut scene, &mut state.font_cache, &mut state.font, act.name, lay.px + 36.0, iy + 10.0, FONT_SMALLER, CosmicColor::rgba(0xEF, 0xDF, 0xE2, 0xFF), "GoogleSansFlex");
+                        render_text(&mut scene, &mut state.font_cache, &mut state.font, act.description, lay.px + 36.0, iy + 26.0, FONT_SMALL, CosmicColor::rgba(0xD5, 0xC2, 0xC6, 0xFF), "GoogleSansFlex");
+                    }
+
             }
         }
         LauncherView::AppList => {
             let start = state.launcher.scroll_offset.min(state.launcher.matching.len().saturating_sub(1));
-            let end = (start + max_visible).min(state.launcher.matching.len());
+            let end = (start + lay.max_visible).min(state.launcher.matching.len());
             for (rel_i, &app_idx) in state.launcher.matching[start..end].iter().enumerate() {
                 let app = &state.launcher.apps[app_idx];
-                let iy = start_y + rel_i as f32 * item_h;
-                if start + rel_i == state.launcher.selection {
-                    fill_rounded_rect(&mut scene, px + 6.0, iy, panel_w - 12.0, item_h - 4.0, 8.0, color((0xCD, 0xD6, 0xF4, 0x12)));
-                }
+                let iy = lay.start_y + rel_i as f32 * lay.item_h;
+                    if start + rel_i == state.launcher.selection {
+                        fill_rounded_rect(&mut scene, lay.px + 6.0, iy, lay.pw - 12.0, lay.item_h - 4.0, RADIUS_SM, color((0xEF, 0xDF, 0xE2, 0x1A)));
+                    }
 
-                let icon_size = 28.0;
-                let icon_x = px + 12.0;
-                let icon_y = iy + (item_h - icon_size) / 2.0;
-                let icon_data = load_app_icon(&mut state.icon_cache, &app.icon);
-                if let Some(img) = icon_data {
-                    draw_icon(&mut scene, icon_x, icon_y, icon_size, img);
-                } else {
-                    fill_rounded_rect(&mut scene, icon_x, icon_y, icon_size, icon_size, 7.0, color((0x45, 0x47, 0x5A, 0xFF)));
-                    let mut buf = [0u8; 4];
-                    let first = app.name.chars().next().unwrap_or('?').encode_utf8(&mut buf);
-                    render_text(&mut scene, &mut state.font, &mut state.swash, first, icon_x + 9.0, icon_y + 7.0, 13.0, CosmicColor::rgba(0xA6, 0xAD, 0xC8, 0xFF));
-                }
+                    let icon_size = 28.0;
+                    let icon_x = lay.px + 12.0;
+                    let icon_y = iy + (lay.item_h - icon_size) / 2.0;
+                    let icon_data = load_app_icon(&mut state.icon_cache, &app.icon);
+                    if let Some(img) = icon_data {
+                        draw_icon(&mut scene, icon_x, icon_y, icon_size, img);
+                    } else {
+                        fill_rounded_rect(&mut scene, icon_x, icon_y, icon_size, icon_size, 7.0, color((0x45, 0x47, 0x5A, 0xFF)));
+                        let mut buf = [0u8; 4];
+                        let first = app.name.chars().next().unwrap_or('?').encode_utf8(&mut buf);
+                        render_text(&mut scene, &mut state.font_cache, &mut state.font, first, icon_x + 9.0, icon_y + 7.0, FONT_SMALLER, CosmicColor::rgba(0xA6, 0xAD, 0xC8, 0xFF), "GoogleSansFlex");
+                    }
 
-                let label_x = icon_x + icon_size + 10.0;
-                render_text(&mut scene, &mut state.font, &mut state.swash, &app.name, label_x, iy + 10.0, 13.0, CosmicColor::rgba(0xCD, 0xD6, 0xF4, 0xFF));
-                let comment = if !app.comment.is_empty() { &app.comment } else { &app.generic_name };
-                if !comment.is_empty() {
-                    render_text(&mut scene, &mut state.font, &mut state.swash, comment, label_x, iy + 26.0, 11.0, CosmicColor::rgba(0x6C, 0x70, 0x86, 0xFF));
-                }
+                    let label_x = icon_x + icon_size + 10.0;
+                    render_text(&mut scene, &mut state.font_cache, &mut state.font, &app.name, label_x, iy + 10.0, FONT_SMALLER, CosmicColor::rgba(0xEF, 0xDF, 0xE2, 0xFF), "GoogleSansFlex");
+                    let comment = if !app.comment.is_empty() { &app.comment } else { &app.generic_name };
+                    if !comment.is_empty() {
+                        render_text(&mut scene, &mut state.font_cache, &mut state.font, comment, label_x, iy + 26.0, FONT_SMALL, CosmicColor::rgba(0xD5, 0xC2, 0xC6, 0xFF), "GoogleSansFlex");
+                    }
+
             }
         }
     }
 
-    (scene, (px, py, panel_w, panel_h))
+    (scene, (lay.px, lay.py, lay.pw, lay.ph))
 }
