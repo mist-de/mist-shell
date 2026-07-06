@@ -106,24 +106,3 @@ MangoWM users: workspace clicks switch tags, window title clicks activate window
 Bundled in `fonts/`: Inter, NotoSans Nerd Font, JetBrains Mono Nerd Font, Material Symbols Rounded.
 
 <details>
-<summary>Architecture</summary>
-
-```
-src/
-├── main.zig          Entry point, event loop
-├── wl.zig            Wayland context, layer surfaces, SHM buffers, protocol listeners
-├── bar.zig           Bar layout, widget rendering (left/center/right sections)
-├── render.zig        Pixel-level canvas with smoothstep AA
-├── font.zig          FreeType glyph rendering, cache
-├── text.zig          HarfBuzz text shaping, compositing
-├── config.zig        Configuration, font paths
-├── seat.zig          Pointer/keyboard input, click dispatch
-├── output.zig        Output lifecycle, bar per-monitor
-├── geometry.zig      Point, Rect, Size types
-├── color.zig         ARGB color, premultiplied alpha
-├── util.zig          BoundedArray generic
-├── c.zig             @cImport bridge for FreeType + HarfBuzz
-└── tr.h              Minimal C header for text rendering
-```
-
-</details>
