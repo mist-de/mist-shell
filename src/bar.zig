@@ -8,12 +8,12 @@ const LayerSurface = @import("wl.zig").LayerSurface;
 const ShmBuffer = @import("wl.zig").ShmBuffer;
 const CursorShape = @import("wl.zig").CursorShape;
 const Canvas = @import("render.zig").Canvas;
+const render_mod = @import("render.zig");
+const Font = render_mod.Font;
 const config_mod = @import("config.zig");
 const Color = config_mod.Color;
 const Appearance = config_mod.Appearance;
 const Rect = config_mod.Rect;
-const Font = @import("text.zig").Font;
-const text_mod = @import("text.zig");
 
 // ═══════════════════════════════════════════════════════════
 // OutputState — per-output bar lifecycle
@@ -204,7 +204,7 @@ pub const Bar = struct {
 
         if (self.font_icon) |*f_icon| {
             const tbl = @divTrunc(bar_h - f_icon.lineHeight(), 2) + f_icon.baselineOffset();
-            text_mod.renderText(&canvas, f_icon, "\u{F313}", sidebar_x + 8, tbl, col_on_layer0);
+            render_mod.renderText(&canvas, f_icon, "\u{F313}", sidebar_x + 8, tbl, col_on_layer0);
         } else {
             const sidebar_cx = sidebar_x + @divTrunc(sidebar_btn_size, 2);
             const sidebar_cy = @divTrunc(bar_h, 2);
@@ -229,8 +229,8 @@ pub const Bar = struct {
             else
                 "Mist DE";
 
-            text_mod.renderText(&canvas, f_ptr, app_name, aw_x, row1_y, col_subtext);
-            text_mod.renderText(&canvas, f_ptr, window_title, aw_x, row2_y, col_on_layer0);
+            render_mod.renderText(&canvas, f_ptr, app_name, aw_x, row1_y, col_subtext);
+            render_mod.renderText(&canvas, f_ptr, window_title, aw_x, row2_y, col_on_layer0);
         }
 
         // ═══ CENTER: 3 BarGroups ═══
@@ -262,7 +262,7 @@ pub const Bar = struct {
             canvas.fillCircle(ring_cx, ring_cy, 3, col_on_secondary_container);
             if (self.font) |*f| {
                 const tbl = @divTrunc(bar_h - f.lineHeight(), 2) + f.baselineOffset();
-                text_mod.renderText(&canvas, f, "52", res_x + ring_outer * 2 + 2, tbl, col_on_layer1);
+                render_mod.renderText(&canvas, f, "52", res_x + ring_outer * 2 + 2, tbl, col_on_layer1);
             }
             res_x += 42;
             if (ri < 2) res_x += 6;
@@ -279,7 +279,7 @@ pub const Bar = struct {
             if (media_text_w > 10 and self.font != null) {
                 const f_ptr = &self.font.?;
                 const tbl = @divTrunc(bar_h - f_ptr.lineHeight(), 2) + f_ptr.baselineOffset();
-                text_mod.renderText(&canvas, f_ptr, "Song Title", res_x, tbl, col_on_layer1);
+                render_mod.renderText(&canvas, f_ptr, "Song Title", res_x, tbl, col_on_layer1);
             }
         }
 
@@ -357,16 +357,16 @@ pub const Bar = struct {
             const clock_str = "12:34";
             const sep_str = "\u{2022}";
             const date_str = "Mon 6 Jul";
-            const clock_w = text_mod.textWidth(f, clock_str);
-            const sep_w = text_mod.textWidth(f, sep_str);
-            const date_w = text_mod.textWidth(f, date_str);
+            const clock_w = render_mod.textWidth(f, clock_str);
+            const sep_w = render_mod.textWidth(f, sep_str);
+            const date_w = render_mod.textWidth(f, date_str);
             const total_clock_w = clock_w + 4 + sep_w + 4 + date_w;
             var cx = rc_x + @divTrunc(center_mod_w - total_clock_w, 2);
-            text_mod.renderText(&canvas, f, clock_str, cx, tbl, col_on_layer1);
+            render_mod.renderText(&canvas, f, clock_str, cx, tbl, col_on_layer1);
             cx += clock_w + 4;
-            text_mod.renderText(&canvas, f, sep_str, cx, tbl, col_on_layer1);
+            render_mod.renderText(&canvas, f, sep_str, cx, tbl, col_on_layer1);
             cx += sep_w + 4;
-            text_mod.renderText(&canvas, f, date_str, cx, tbl, col_on_layer1);
+            render_mod.renderText(&canvas, f, date_str, cx, tbl, col_on_layer1);
         }
 
         const bat_w: i32 = 30;
@@ -378,7 +378,7 @@ pub const Bar = struct {
         canvas.fillRoundedRect(bat_x + 2, bat_y_pos + 2, bat_fill_w, bat_h - 4, 9999, col_on_secondary_container);
         if (self.font) |*f| {
             const tbl = bat_y_pos + @divTrunc(bat_h - f.lineHeight(), 2) + f.baselineOffset();
-            text_mod.renderText(&canvas, f, "80%", bat_x + 2, tbl, col_on_layer1);
+            render_mod.renderText(&canvas, f, "80%", bat_x + 2, tbl, col_on_layer1);
         }
 
         // ═══ RIGHT: RTL sidebar + system tray ═══
@@ -396,7 +396,7 @@ pub const Bar = struct {
             const tbl = @divTrunc(bar_h - f_mat.lineHeight(), 2) + f_mat.baselineOffset();
             const quick_settings = [_][]const u8{ "network_wifi", "bluetooth", "volume_up", "mic", "battery_5_bar", "notifications" };
             for (quick_settings) |icon_str| {
-                text_mod.renderText(&canvas, f_mat, icon_str, icon_x, tbl, col_on_layer0);
+                render_mod.renderText(&canvas, f_mat, icon_str, icon_x, tbl, col_on_layer0);
                 icon_x += rsb_icon_size + rsb_spacing;
             }
         } else {
