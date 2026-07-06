@@ -350,7 +350,7 @@ pub const Bar = struct {
             ctx.media_area_x1 = lcX + centerSideModuleWidth;
             resX += 8;
             const mediaRingCX: i32 = resX + 10;
-            const mediaProgress: f32 = 0.42; // placeholder: 42% progress
+            const mediaProgress: f32 = if (mpris.has_player and mpris.length > 0) @as(f32, @floatFromInt(mpris.position)) / @as(f32, @floatFromInt(mpris.length)) else 0;
             canvas.fillCircle(mediaRingCX, centerY, 10.0, Color.rgba(0xec, 0xe6, 0xe9, 0x80));
             canvas.fillArc(mediaRingCX, centerY, 0, 10, half_pi, -two_pi * mediaProgress, colOnSecondaryContainer);
 

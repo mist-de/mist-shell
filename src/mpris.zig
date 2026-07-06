@@ -150,12 +150,15 @@ pub const MprisPlayer = struct {
         defer _ = bc.sd_bus_message_unref(reply);
         const m = reply.?;
 
-        var prop_type: [*c]const u8 = undefined;
-        var rrc = bc.enter_variant(m, @ptrCast(&prop_type));
+        var sig: [*c]const u8 = undefined;
+        var rrc = bc.enter_variant(m, @ptrCast(&sig));
         if (rrc <= 0) return;
 
         rrc = bc.sd_bus_message_enter_container(m, 'a', "{sv}");
-        if (rrc <= 0) return;
+        if (rrc <= 0) {
+            _ = bc.sd_bus_message_exit_container(m);
+            return;
+        }
 
         var has_title = false;
         var has_artist = false;
@@ -225,6 +228,9 @@ pub const MprisPlayer = struct {
                     self.length = val;
                     has_length = true;
                 }
+            } else if (val_type) |vt_str| {
+                // Must consume variant content before exiting container
+                _ = bc.sd_bus_message_skip(m, vt_str);
             }
 
             _ = bc.sd_bus_message_exit_container(m); // variant
