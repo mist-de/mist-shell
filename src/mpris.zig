@@ -64,14 +64,12 @@ pub const MprisPlayer = struct {
         };
         if (!self.has_player) { self.changed = true; }
 
-        @memcpy(self.name_buf[0..pname.len], pname);
-        self.name_buf[pname.len] = 0;
-        self.name = self.name_buf[0..pname.len :0];
+        self.name = pname;
         self.has_player = true;
         self.readProperties(b);
     }
 
-    fn findPlayer(self: *MprisPlayer, bus: *bc.sd_bus) ?[]const u8 {
+    fn findPlayer(self: *MprisPlayer, bus: *bc.sd_bus) ?[:0]const u8 {
         var error_val: bc.sd_bus_error = std.mem.zeroes(bc.sd_bus_error);
         defer bc.sd_bus_error_free(&error_val);
 
@@ -94,11 +92,11 @@ pub const MprisPlayer = struct {
             const n = name orelse continue;
             const s = std.mem.span(n);
             if (std.mem.startsWith(u8, s, "org.mpris.MediaPlayer2.")) {
-                const len = @min(s.len, self.name_buf.len - 1);
-                @memcpy(self.name_buf[0..len], s[0..len]);
-                self.name_buf[len] = 0;
-                _ = bc.sd_bus_message_exit_container(reply);
-                return self.name_buf[0..len];
+            const len = @min(s.len, self.name_buf.len - 1);
+            @memcpy(self.name_buf[0..len], s[0..len]);
+            self.name_buf[len] = 0;
+            _ = bc.sd_bus_message_exit_container(reply);
+            return self.name_buf[0..len :0];
             }
         }
         _ = bc.sd_bus_message_exit_container(reply);
