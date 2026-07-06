@@ -7,7 +7,7 @@
 
 A minimal Wayland desktop environment shell written in Zig.
 
-Inspired by [end-4](https://github.com/end-4/dots), but rewritten from scratch with zero GPU dependencies — pure software rendering via wl_shm.
+Inspired by [end-4](https://github.com/end-4/dots-hyprland), but rewritten from scratch with zero GPU dependencies — pure software rendering via wl_shm.
 
 ## Quick Start
 
