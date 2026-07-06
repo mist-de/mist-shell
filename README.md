@@ -90,12 +90,12 @@ build.zig        — wayland protocol scanner
 
 ## Compositor Support
 
+Requires `wlr-layer-shell`, `ext-workspace-v1`, and `zwlr-foreign-toplevel-management-v1`. Only tested on:
+
 | Compositor | Status |
 |------------|--------|
-| River      | Supported |
-| Sway       | Supported |
-| Hyprland   | Supported |
-| Labwc      | Supported |
+| River      | Confirmed |
+| MangoWM    | Confirmed (dwl-based) |
 
 ## Status
 
