@@ -89,6 +89,8 @@ pub const Context = struct {
     last_enter_serial: u32 = 0,
     last_cursor_shape: ?CursorShape = null,
     pointer_over_popup: bool = false,
+    pointer_x: i32 = 0,
+    pointer_y: i32 = 0,
 
     toplevels: [max_toplevels]ToplevelInfo = undefined,
     toplevel_count: usize = 0,

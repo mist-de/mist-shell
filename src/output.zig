@@ -78,3 +78,12 @@ pub fn deinit() void {
     }
     output_count = 0;
 }
+
+pub fn markAllDirty(ctx: *Context) void {
+    _ = ctx;
+    for (0..output_count) |i| {
+        if (outputs[i].bar) |*bar| {
+            bar.needs_full_redraw = true;
+        }
+    }
+}
