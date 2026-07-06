@@ -284,10 +284,10 @@ pub const Bar = struct {
         if (useShortenedForm == 0) {
             if (self.font_small) |*fSml| {
                 if (self.font) |*f| {
-                    const groupH: i32 = 12 + 15 - 4;
-                    const groupTop: i32 = @divTrunc(bar_h - groupH, 2);
-                    const row1Y: i32 = groupTop + 12;
-                    const row2Y: i32 = row1Y - 4 + 15;
+                    const colH: i32 = fSml.lineHeight() + (-4) + f.lineHeight();
+                    const colTop: i32 = @divTrunc(bar_h - colH, 2);
+                    const row1Y: i32 = colTop + fSml.baselineOffset();
+                    const row2Y: i32 = row1Y - fSml.baselineOffset() + fSml.lineHeight() + (-4) + f.baselineOffset();
                     render_mod.renderText(&canvas, fSml, appName, awX, row1Y, colSubtext);
                     render_mod.renderText(&canvas, f, windowTitle, awX, row2Y, colOnLayer0);
                 }
@@ -322,7 +322,7 @@ pub const Bar = struct {
 
             if (self.font_material) |*fMat| {
                 const tbl = @divTrunc(bar_h - fMat.lineHeight(), 2) + fMat.baselineOffset();
-                render_mod.renderText(&canvas, fMat, rd.icon, ringCX - 8, tbl, colLayer1);
+                render_mod.renderText(&canvas, fMat, rd.icon, ringCX - 9, tbl, colLayer1);
             }
 
             if (self.font) |*f| {
@@ -330,7 +330,10 @@ pub const Bar = struct {
                 const pctInt: i32 = @intFromFloat(rd.pct * 100.0);
                 var pctBuf: [8]u8 = undefined;
                 const pctStr = std.fmt.bufPrint(&pctBuf, "{d}", .{pctInt}) catch "0";
-                render_mod.renderText(&canvas, f, pctStr, ringCX + ringR + 2, tbl2, colOnLayer1);
+                const pctBoxW: i32 = render_mod.textWidth(f, "100");
+                const pctStrW: i32 = render_mod.textWidth(f, pctStr);
+                const pctX: i32 = ringCX + ringR + 2 + @divTrunc(pctBoxW - pctStrW, 2);
+                render_mod.renderText(&canvas, f, pctStr, pctX, tbl2, colOnLayer1);
             }
             resX += 46;
         }
@@ -345,14 +348,17 @@ pub const Bar = struct {
 
             if (self.font_material) |*fMat| {
                 const tbl = @divTrunc(bar_h - fMat.lineHeight(), 2) + fMat.baselineOffset();
-                render_mod.renderText(&canvas, fMat, "music_note", mediaRingCX - 7, tbl, colLayer1);
+                render_mod.renderText(&canvas, fMat, "music_note", mediaRingCX - 9, tbl, colLayer1);
             }
 
-            resX += 36;
+            resX += 24;
             const mediaTextW: i32 = lcX + centerSideModuleWidth - resX - groupPadding;
             if (mediaTextW > 10 and self.font != null) {
                 const tbl = @divTrunc(bar_h - self.font.?.lineHeight(), 2) + self.font.?.baselineOffset();
-                render_mod.renderText(&canvas, &self.font.?, "No media", resX, tbl, colOnLayer1);
+                const mediaStr = "No media";
+                const mediaStrW = render_mod.textWidth(&self.font.?, mediaStr);
+                const mediaX = resX + @divTrunc(mediaTextW - mediaStrW, 2);
+                render_mod.renderText(&canvas, &self.font.?, mediaStr, mediaX, tbl, colOnLayer1);
             }
         }
 
@@ -527,9 +533,9 @@ pub const Bar = struct {
         const batY: i32 = centerY - @divTrunc(batH, 2);
         const batTrack = Color.rgba(0xec, 0xe6, 0xe9, 0x80);
         canvas.fillRoundedRectAA(batX, batY, batW, batH, fullRounding, batTrack);
-        const batFillW: i32 = @divTrunc((batW - 4) * 80, 100);
+        const batFillW: i32 = @divTrunc(batW * 80, 100);
         if (batFillW > 0) {
-            canvas.fillRoundedRectAA(batX + 2, batY + 2, batFillW, batH - 4, fullRounding, colOnSecondaryContainer);
+            canvas.fillRoundedRectAA(batX, batY, batFillW, batH, fullRounding, colOnSecondaryContainer);
         }
         const charging = false;
         if (charging) {
@@ -544,7 +550,7 @@ pub const Bar = struct {
                 const tbl = batY + @divTrunc(batH - f.lineHeight(), 2) + f.baselineOffset();
                 const batStr = "80";
                 const batTW: i32 = render_mod.textWidth(f, batStr);
-                render_mod.renderText(&canvas, f, batStr, batX + @divTrunc(batW - batTW, 2), tbl, colOnLayer1);
+                render_mod.renderText(&canvas, f, batStr, batX + @divTrunc(batW - batTW, 2), tbl, colLayer1);
             }
         }
 
