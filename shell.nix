@@ -10,29 +10,20 @@ pkgs.mkShell {
     wayland
     wayland-scanner
     wayland-protocols
-    wlroots_0_20
     libxkbcommon
     freetype
     harfbuzz
-    pixman
-    fontconfig
-    basu
+    pkg-config
 
     # Compositor for testing
     river
-
-    # Build tools
-    pkg-config
-    gcc
-    gnumake
-    cmake
   ];
 
   shellHook = ''
     echo "Mist DE development shell"
     echo "Zig $(zig version)"
     echo ""
-    echo "Available: river $(river -version 2>/dev/null || echo 'not in PATH')"
-    echo "wayland, freetype, harfbuzz, pixman, basu, fontconfig, xkbcommon, wlroots"
+    echo "Run: zig build -Doptimize=ReleaseFast -- -lwayland-client -lxkbcommon -lfreetype -lharfbuzz"
+    echo "Then: ./zig-out/bin/mist-bar"
   '';
 }
