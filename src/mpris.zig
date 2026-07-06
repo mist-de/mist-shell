@@ -228,9 +228,12 @@ pub const MprisPlayer = struct {
                     self.length = val;
                     has_length = true;
                 }
-            } else if (val_type) |vt_str| {
-                // Must consume variant content before exiting container
-                _ = bc.sd_bus_message_skip(m, vt_str);
+            } else if (vt != 0) {
+                // Must consume variant content before exiting container.
+                // sd_bus_message_skip interprets the type string as individual
+                // elements, so we pass only the first char (e.g. "a" for "as")
+                var skip_type: [2]u8 = .{ vt, 0 };
+                _ = bc.sd_bus_message_skip(m, @ptrCast(&skip_type));
             }
 
             _ = bc.sd_bus_message_exit_container(m); // variant
