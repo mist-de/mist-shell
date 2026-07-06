@@ -281,6 +281,7 @@ pub const Bar = struct {
 
         // Active window text (10px left margin from button)
         const awX: i32 = sidebarBtnX + sidebarBtnW + 10;
+        const awMaxW: i32 = lcX - awX;
         if (useShortenedForm == 0) {
             if (self.font_small) |*fSml| {
                 if (self.font) |*f| {
@@ -288,8 +289,12 @@ pub const Bar = struct {
                     const colTop: i32 = @divTrunc(bar_h - colH, 2);
                     const row1Y: i32 = colTop + fSml.baselineOffset();
                     const row2Y: i32 = row1Y - fSml.baselineOffset() + fSml.lineHeight() + (-4) + f.baselineOffset();
-                    render_mod.renderText(&canvas, fSml, appName, awX, row1Y, colSubtext);
-                    render_mod.renderText(&canvas, f, windowTitle, awX, row2Y, colOnLayer0);
+                    var appBuf: [512]u8 = undefined;
+                    var titleBuf: [512]u8 = undefined;
+                    const appNameFinal = truncateText(fSml, appName, awMaxW, &appBuf);
+                    const titleFinal = truncateText(f, windowTitle, awMaxW, &titleBuf);
+                    render_mod.renderText(&canvas, fSml, appNameFinal, awX, row1Y, colSubtext);
+                    render_mod.renderText(&canvas, f, titleFinal, awX, row2Y, colOnLayer0);
                 }
             }
         }
@@ -695,6 +700,24 @@ fn handleClick(ctx: *Context, x: i32, y: i32) void {
             return;
         }
     }
+}
+
+fn truncateText(font: *Font, text: []const u8, maxW: i32, out: []u8) []const u8 {
+    if (text.len == 0 or render_mod.textWidth(font, text) <= maxW) return text;
+    const ellipsis = "...";
+    const ellipsisW = render_mod.textWidth(font, ellipsis);
+    if (maxW <= ellipsisW) return "";
+    const targetW = maxW - ellipsisW;
+    var lo: usize = 0;
+    var hi: usize = text.len;
+    while (lo < hi) {
+        const mid = (lo + hi + 1) / 2;
+        if (render_mod.textWidth(font, text[0..mid]) <= targetW) lo = mid else hi = mid - 1;
+    }
+    if (lo == 0) return ellipsis;
+    @memcpy(out[0..lo], text[0..lo]);
+    @memcpy(out[lo..][0..3], ellipsis);
+    return out[0 .. lo + 3];
 }
 
 fn setCursorShape(ctx: *Context, serial: u32, shape: CursorShape) void {
