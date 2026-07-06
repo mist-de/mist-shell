@@ -4,6 +4,7 @@ const posix = std.posix;
 const Context = @import("wl.zig").Context;
 const bar_mod = @import("bar.zig");
 const config_mod = @import("config.zig");
+const mpris_mod = @import("mpris.zig");
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
@@ -23,6 +24,13 @@ pub fn main() !void {
     ctx.roundtrip();
     std.log.info("outputs: {d}", .{ctx.output_count});
 
+    // MPRIS media player (D-Bus via basu)
+    var mpris = mpris_mod.MprisPlayer.init() catch |err| blk: {
+        std.log.warn("mpris init: {s}", .{@errorName(err)});
+        break :blk mpris_mod.MprisPlayer{};
+    };
+    mpris.tick();
+
     for (0..ctx.output_count) |i| {
         bar_mod.initOutput(&ctx, i) catch |err| {
             std.log.warn("output {d}: {s}", .{ i, @errorName(err) });
@@ -30,16 +38,21 @@ pub fn main() !void {
     }
 
     ctx.roundtrip();
-    bar_mod.drawOutputs(&ctx);
+    bar_mod.drawOutputs(&ctx, &mpris);
 
     const wayland_fd = ctx.getFd();
 
     while (ctx.running) {
-        var fds: [1]posix.pollfd = .{
-            .{ .fd = wayland_fd, .events = posix.POLL.IN, .revents = 0 },
-        };
+        // Process D-Bus MPRIS events
+        mpris.tick();
 
-        _ = posix.poll(&fds, 100) catch |err| {
+        const dbus_fd = mpris.getFd();
+        var fds: [2]posix.pollfd = undefined;
+        fds[0] = .{ .fd = wayland_fd, .events = posix.POLL.IN, .revents = 0 };
+        fds[1] = .{ .fd = if (dbus_fd >= 0) dbus_fd else wayland_fd, .events = posix.POLL.IN, .revents = 0 };
+        const nfds: u16 = if (dbus_fd >= 0) 2 else 1;
+
+        _ = posix.poll(fds[0..nfds], 100) catch |err| {
             std.log.warn("poll: {s}", .{@errorName(err)});
             break;
         };
@@ -53,6 +66,10 @@ pub fn main() !void {
             break;
         }
 
+        if (dbus_fd >= 0 and fds[1].revents & posix.POLL.IN != 0) {
+            mpris.process();
+        }
+
         // Periodic resource update (~3s at 100ms poll intervals)
         ctx.resource_counter += 1;
         if (ctx.resource_counter >= 30) {
@@ -62,13 +79,18 @@ pub fn main() !void {
         }
 
         // Redraw when workspace/toplevel state changed
+        if (mpris.changed) {
+            ctx.bar_dirty = true;
+            mpris.changed = false;
+        }
         if (ctx.bar_dirty) {
             bar_mod.markAllDirty(&ctx);
             ctx.bar_dirty = false;
         }
-        bar_mod.drawOutputs(&ctx);
+        bar_mod.drawOutputs(&ctx, &mpris);
     }
 
+    mpris.deinit();
     bar_mod.deinitOutputs();
     std.log.info("shutdown", .{});
 }

@@ -10,6 +10,7 @@ A minimal Wayland desktop environment shell written in Zig — inspired by [end-
 - Pure CPU rendering — no GPU required
 - Zero GLib dependencies — no GTK/GNOME baggage
 - FreeType + HarfBuzz for text via @cImport (Ghostty pattern)
+- MPRIS media detection via basu (sd-bus, zero GLib)
 - ~530 KB stripped binary
 
 ## Quick Start
@@ -26,30 +27,30 @@ zig build -Doptimize=ReleaseFast -- -lwayland-client -lxkbcommon -lfreetype -lha
 **Debian / Ubuntu:**
 ```sh
 sudo apt install libwayland-dev wayland-protocols libxkbcommon-dev \
-  libfreetype-dev libharfbuzz-dev pkg-config zig
+  libfreetype-dev libharfbuzz-dev libbasu-dev zig
 ```
 
 **Fedora:**
 ```sh
 sudo dnf install wayland-devel wayland-protocols-devel libxkbcommon-devel \
-  freetype-devel harfbuzz-devel pkg-config zig
+  freetype-devel harfbuzz-devel basu-devel zig
 ```
 
 **Arch Linux:**
 ```sh
-sudo pacman -S wayland wayland-protocols libxkbcommon freetype2 harfbuzz pkgconf zig
+sudo pacman -S wayland wayland-protocols libxkbcommon freetype2 harfbuzz basu zig
 ```
 
 **Void Linux:**
 ```sh
 sudo xbps-install -S wayland-devel wayland-protocols libxkbcommon-devel \
-  freetype-devel harfbuzz-devel pkg-config zig
+  freetype-devel harfbuzz-devel basu-devel zig
 ```
 
 **openSUSE:**
 ```sh
 sudo zypper install wayland-devel wayland-protocols-devel libxkbcommon-devel \
-  freetype2-devel harfbuzz-devel pkg-config zig
+  freetype2-devel harfbuzz-devel basu-devel zig
 ```
 
 **NixOS:**
@@ -83,7 +84,12 @@ src/
 ├── output.zig   — per-output bar lifecycle
 ├── geometry.zig — Point, Rect, Size
 ├── color.zig    — Color with ARGB pixel conversion
-└── util.zig     — BoundedArray generic
+├── util.zig     — BoundedArray generic
+├── mpris.zig    — MPRIS D-Bus client via basu
+├── basu_c.zig   — basu C bindings (@cImport)
+├── c.zig        — FreeType + HarfBuzz C bindings (@cImport)
+├── tr.h         — FreeType + HarfBuzz C headers
+├── basu.h       — basu C header
 fonts/           — bundled Inter, NotoSans NF, JetBrainsMono NF, Material Symbols
 build.zig        — wayland protocol scanner
 ```
@@ -109,7 +115,7 @@ Requires `wlr-layer-shell`, `ext-workspace-v1`, and `zwlr-foreign-toplevel-manag
 | Active window tracking | Working (live via zwlr-foreign-toplevel) |
 | Mouse input (click workspace/activate) | Working |
 | Resource rings | Working (live /proc) |
-| D-Bus services | Not implemented |
+| MPRIS media detection | Working (D-Bus via basu) |
 | Auto-hide | Not implemented |
 | Popups / tooltips | Not implemented |
 | Config file parsing | Not implemented |

@@ -12,6 +12,7 @@ const render_mod = @import("render.zig");
 const Font = render_mod.Font;
 const config_mod = @import("config.zig");
 const Color = config_mod.Color;
+const mpris_mod = @import("mpris.zig");
 const Appearance = config_mod.Appearance;
 const Rect = config_mod.Rect;
 
@@ -57,7 +58,7 @@ fn ensureBar(ctx: *Context, output_idx: usize) !void {
     }
 }
 
-pub fn drawOutputs(ctx: *Context) void {
+pub fn drawOutputs(ctx: *Context, mpris: *mpris_mod.MprisPlayer) void {
     for (0..output_count) |i| {
         const out = &outputs[i];
         if (out.bar == null) continue;
@@ -67,7 +68,7 @@ pub fn drawOutputs(ctx: *Context) void {
 
         const bar = &out.bar.?;
         bar.ensureBuffer(ctx, width) catch continue;
-        bar.draw(ctx) catch |err| {
+        bar.draw(ctx, mpris) catch |err| {
             std.log.warn("draw: {s}", .{@errorName(err)});
         };
     }
@@ -174,7 +175,7 @@ pub const Bar = struct {
         self.needs_full_redraw = true;
     }
 
-    pub fn draw(self: *Bar, ctx: *Context) !void {
+    pub fn draw(self: *Bar, ctx: *Context, mpris: *mpris_mod.MprisPlayer) !void {
         if (!self.needs_full_redraw) return;
         const buf = self.buffer orelse return;
         var canvas = Canvas{
@@ -353,17 +354,36 @@ pub const Bar = struct {
 
             if (self.font_material) |*fMat| {
                 const tbl = @divTrunc(bar_h - fMat.lineHeight(), 2) + fMat.baselineOffset();
-                render_mod.renderText(&canvas, fMat, "music_note", mediaRingCX - 9, tbl, colLayer1);
+                const icon = if (mpris.has_player and mpris.status == .playing) "pause" else "music_note";
+                render_mod.renderText(&canvas, fMat, icon, mediaRingCX - 9, tbl, colLayer1);
             }
 
             resX += 24;
             const mediaTextW: i32 = lcX + centerSideModuleWidth - resX - groupPadding;
             if (mediaTextW > 10 and self.font != null) {
                 const tbl = @divTrunc(bar_h - self.font.?.lineHeight(), 2) + self.font.?.baselineOffset();
-                const mediaStr = "No media";
-                const mediaStrW = render_mod.textWidth(&self.font.?, mediaStr);
-                const mediaX = resX + @divTrunc(mediaTextW - mediaStrW, 2);
-                render_mod.renderText(&canvas, &self.font.?, mediaStr, mediaX, tbl, colOnLayer1);
+                var mediaBuf: [512]u8 = undefined;
+                const mediaStr: []const u8 = if (mpris.has_player and mpris.title.len > 0) blk: {
+                    if (mpris.artist.len > 0) {
+                        const sep = " \xe2\x80\xa2 ";
+                        const sep_len: usize = sep.len;
+                        const total = mpris.title.len + sep_len + mpris.artist.len;
+                        const len = @min(total, mediaBuf.len - 1);
+                        const artist_max = len -| mpris.title.len -| sep_len;
+                        @memcpy(mediaBuf[0..mpris.title.len], mpris.title);
+                        @memcpy(mediaBuf[mpris.title.len..][0..sep_len], sep);
+                        @memcpy(mediaBuf[mpris.title.len + sep_len ..][0..@min(artist_max, mpris.artist.len)], mpris.artist[0..artist_max]);
+                        break :blk mediaBuf[0..len];
+                    }
+                    const len = @min(mpris.title.len, mediaBuf.len - 1);
+                    @memcpy(mediaBuf[0..len], mpris.title);
+                    break :blk mediaBuf[0..len];
+                } else "No media";
+                var displayBuf: [512]u8 = undefined;
+                const displayStr = truncateText(&self.font.?, mediaStr, mediaTextW, &displayBuf);
+                const displayW = render_mod.textWidth(&self.font.?, displayStr);
+                const mediaX = resX + @divTrunc(mediaTextW - displayW, 2);
+                render_mod.renderText(&canvas, &self.font.?, displayStr, mediaX, tbl, colOnLayer1);
             }
         }
 

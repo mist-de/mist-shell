@@ -61,6 +61,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.linkSystemLibrary("xkbcommon", .{});
     exe.root_module.linkSystemLibrary("freetype", .{});
     exe.root_module.linkSystemLibrary("harfbuzz", .{});
+    exe.root_module.linkSystemLibrary("basu", .{});
 
     const fonts_install = b.addInstallDirectory(.{
         .source_dir = b.path("fonts"),

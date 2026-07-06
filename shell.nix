@@ -10,7 +10,7 @@ pkgs.mkShell {
     libxkbcommon
     freetype
     harfbuzz
-    pkg-config
+    basu
     river
   ];
 
