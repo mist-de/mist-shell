@@ -290,6 +290,114 @@ pub const Canvas = struct {
         }
         return x;
     }
+
+    fn sdfRoundedRect(px: f32, py: f32, x: f32, y: f32, w: f32, h: f32, r: f32) f32 {
+        const cx = x + w * 0.5;
+        const cy = y + h * 0.5;
+        const qx = @abs(px - cx);
+        const qy = @abs(py - cy);
+        const hw = w * 0.5 - r;
+        const hh = h * 0.5 - r;
+        const dx = qx - hw;
+        const dy = qy - hh;
+        const ex = if (dx > 0) dx else 0.0;
+        const ey = if (dy > 0) dy else 0.0;
+        return @sqrt(ex * ex + ey * ey) - r;
+    }
+
+    fn sdfCoverage(dist: f32) u8 {
+        const t = 0.5 - dist;
+        if (t <= 0) return 0;
+        if (t >= 1) return 255;
+        const smooth = t * t * (3.0 - 2.0 * t);
+        return @intFromFloat(smooth * 255.0);
+    }
+
+    pub fn fillRoundedRectAA(self: *Canvas, x: i32, y: i32, w: i32, h: i32, radius: i32, color: Color) void {
+        if (radius <= 0) {
+            self.fillRect(x, y, w, h, color);
+            return;
+        }
+        if (color.a == 0) return;
+
+        const r = @min(radius, @divTrunc(@min(w, h), 2));
+        const x0 = @max(0, x - 1);
+        const y0 = @max(0, y - 1);
+        const x1 = @min(self.width, x + w + 1);
+        const y1 = @min(self.height, y + h + 1);
+        if (x0 >= x1 or y0 >= y1) return;
+
+        const xf: f32 = @floatFromInt(x);
+        const yf: f32 = @floatFromInt(y);
+        const wf: f32 = @floatFromInt(w);
+        const hf: f32 = @floatFromInt(h);
+        const rf: f32 = @floatFromInt(r);
+
+        var row: i32 = y0;
+        while (row < y1) : (row += 1) {
+            const py: f32 = @floatFromInt(row);
+            var col: i32 = x0;
+            while (col < x1) : (col += 1) {
+                const px: f32 = @floatFromInt(col);
+                const dist = sdfRoundedRect(px, py, xf, yf, wf, hf, rf);
+                const coverage = sdfCoverage(dist);
+                if (coverage == 0) continue;
+                const c = if (coverage == 255) color else Color{
+                    .r = color.r,
+                    .g = color.g,
+                    .b = color.b,
+                    .a = @intCast(@min(@as(u32, 255), @as(u32, color.a) * @as(u32, @intCast(coverage)) / 255)),
+                };
+                const offset = @as(usize, @intCast(row * self.stride + col * 4));
+                const dst = @as(*align(1) u32, @ptrCast(&self.data[offset]));
+                dst.* = blendPixel(dst.*, c);
+            }
+        }
+    }
+
+    pub fn drawGlow(self: *Canvas, x: i32, y: i32, w: i32, h: i32, radius: i32, color: Color, spread: f32) void {
+        if (color.a == 0 or spread <= 0) return;
+        const si: i32 = @intFromFloat(spread);
+        const x0 = @max(0, x - si);
+        const y0 = @max(0, y - si);
+        const x1 = @min(self.width, x + w + si);
+        const y1 = @min(self.height, y + h + si);
+        if (x0 >= x1 or y0 >= y1) return;
+
+        const xf: f32 = @floatFromInt(x);
+        const yf: f32 = @floatFromInt(y);
+        const wf: f32 = @floatFromInt(w);
+        const hf: f32 = @floatFromInt(h);
+        const rf: f32 = @floatFromInt(radius);
+        const spread_inv: f32 = 1.0 / spread;
+
+        var row: i32 = y0;
+        while (row < y1) : (row += 1) {
+            const py: f32 = @floatFromInt(row);
+            var col: i32 = x0;
+            while (col < x1) : (col += 1) {
+                const px: f32 = @floatFromInt(col);
+                const dist = sdfRoundedRect(px, py, xf, yf, wf, hf, rf);
+                if (dist >= 0) {
+                    const t = dist * spread_inv;
+                    const glow = @exp(-t * t * 4.0);
+                    if (glow < 1.0 / 256.0) continue;
+                    const alpha_f = @as(f32, @floatFromInt(color.a)) * glow;
+                    const alpha: u8 = @intFromFloat(if (alpha_f >= 255.0) 255.0 else alpha_f);
+                    if (alpha == 0) continue;
+                    const c = Color{
+                        .r = color.r,
+                        .g = color.g,
+                        .b = color.b,
+                        .a = alpha,
+                    };
+                    const offset = @as(usize, @intCast(row * self.stride + col * 4));
+                    const dst = @as(*align(1) u32, @ptrCast(&self.data[offset]));
+                    dst.* = blendPixel(dst.*, c);
+                }
+            }
+        }
+    }
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -434,27 +542,27 @@ pub fn renderText(canvas: *Canvas, font: *Font, text: []const u8, x: i32, y: i32
     const info, const pos = shape(font, text, &glyph_count);
     if (glyph_count == 0) return;
 
-    var pen_x: i32 = x;
+    var pen_x_26_6: i32 = x << 6;
     const baseline_y: i32 = y;
 
     var i: u32 = 0;
     while (i < glyph_count) : (i += 1) {
         const gi = info[i];
         const gp = pos[i];
-        const x_offset: i32 = @intCast(gp.x_offset >> 6);
-        const y_offset: i32 = @intCast(gp.y_offset >> 6);
-        const x_advance: i32 = @intCast(gp.x_advance >> 6);
+        const x_offset: i32 = @intCast(gp.x_offset);
+        const y_offset: i32 = @intCast(gp.y_offset);
+        const x_advance: i32 = @intCast(gp.x_advance);
         const glyph = font.getGlyph(gi.codepoint) catch {
-            pen_x += x_advance;
+            pen_x_26_6 += x_advance;
             continue;
         };
 
-        const dst_x = pen_x + x_offset + glyph.left;
-        const dst_y = baseline_y + y_offset - glyph.top;
+        const dst_x = (pen_x_26_6 + x_offset + (glyph.left << 6)) >> 6;
+        const dst_y = baseline_y + (y_offset >> 6) - glyph.top;
 
         canvas.blitGray(dst_x, dst_y, @intCast(glyph.width), @intCast(glyph.height), glyph.pitch, glyph.buf, color);
 
-        pen_x += x_advance;
+        pen_x_26_6 += x_advance;
     }
 }
 
@@ -466,10 +574,10 @@ pub fn textWidth(font: *Font, text: []const u8) i32 {
     _ = info_discard;
     if (glyph_count == 0) return 0;
 
-    var total: i32 = 0;
+    var total_26_6: i32 = 0;
     var i: u32 = 0;
     while (i < glyph_count) : (i += 1) {
-        total += @as(i32, @intCast(pos[i].x_advance >> 6));
+        total_26_6 += @as(i32, @intCast(pos[i].x_advance));
     }
-    return total;
+    return (total_26_6 + 32) >> 6;
 }
