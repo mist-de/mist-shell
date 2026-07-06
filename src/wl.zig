@@ -137,9 +137,9 @@ pub const Context = struct {
         if (self.workspace_manager) |wsm| {
             wsm.setListener(*Context, workspaceManagerListener, self);
         }
-
-        // Roundtrip again to get initial toplevel/workspace state
-        self.roundtrip();
+        // NOTE: second roundtrip removed — must be done by caller AFTER
+        // setting seat listener to avoid losing the initial seat events
+        // (name, capabilities). See main.zig.
     }
 
     pub fn deinit(self: *Context) void {

@@ -663,6 +663,12 @@ fn keyboardListener(kb: *wl.Keyboard, event: wl.Keyboard.Event, ctx: *Context) v
 }
 
 fn handleClick(ctx: *Context, x: i32, y: i32, button: u32) void {
+    std.log.info("click x={d} y={d} btn=0x{x} media=[{d},{d}) icon=[{d},{d}) mpris={any}", .{
+        x, y, button,
+        ctx.media_area_x0, ctx.media_area_x1,
+        ctx.media_icon_x0, ctx.media_icon_x1,
+        ctx.mpris,
+    });
     const bar_h: i32 = 40;
     const bar_w: i32 = ctx.outputs[0].mode_w;
     const screenRounding: i32 = 23;
@@ -681,14 +687,10 @@ fn handleClick(ctx: *Context, x: i32, y: i32, button: u32) void {
     const wsCellX: i32 = mcX + wsBarGroupPadding;
     const wsY: i32 = centerY - @divTrunc(wsBtnWidth, 2);
 
-    // Media player controls (end-4: middle=playPause, right/forward=next, back=prev, left=mediaControls)
+    // Media player controls (end-4: left=mediaControls, middle=playPause, right/forward=next, back=prev)
     if (x >= ctx.media_area_x0 and x < ctx.media_area_x1 and y >= 0 and y < bar_h) {
         if (ctx.mpris) |mpris| {
-            if (button == 0x110) { // BTN_LEFT → media controls popup (or play/pause on icon)
-                if (x >= ctx.media_icon_x0 and x < ctx.media_icon_x1) {
-                    mpris.playPause();
-                } // else: reserved for media controls popup (end-4: GlobalStates.mediaControlsOpen)
-            } else if (button == 0x112) { // BTN_MIDDLE → play/pause
+            if (button == 0x110 or button == 0x112) { // BTN_LEFT or BTN_MIDDLE → play/pause
                 mpris.playPause();
             } else if (button == 0x111 or button == 0x115) { // BTN_RIGHT or BTN_FORWARD → next
                 mpris.next();

@@ -21,6 +21,8 @@ pub fn main() !void {
         s.setListener(*Context, bar_mod.seatListener, &ctx);
     }
 
+    // Roundtrip to get seat capabilities + initial toplevel/workspace state
+    // Must happen AFTER seat listener is set (see wl.zig init note)
     ctx.roundtrip();
     std.log.info("outputs: {d}", .{ctx.output_count});
 
