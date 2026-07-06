@@ -1,32 +1,26 @@
 const std = @import("std");
 const Scanner = @import("wayland").Scanner;
 
-fn pkgConfigVar(b: *std.Build, pkg_name: []const u8, variable: []const u8) ?[]const u8 {
-    var code: u8 = undefined;
-    const flag = std.fmt.allocPrint(b.allocator, "--variable={s}", .{variable}) catch return null;
-    const stdout = b.runAllowFail(
-        &.{ "pkg-config", flag, pkg_name },
-        &code,
-        .ignore,
-    ) catch return null;
-    return std.mem.trimEnd(u8, stdout, &[_]u8{ '\n', '\r', ' ' });
-}
-
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const wayland_xml = blk: {
-        const dir = pkgConfigVar(b, "wayland-scanner", "pkgdatadir") orelse
-            @panic("wayland-scanner not found via pkg-config. Install wayland-scanner (wayland-devel on Fedora, libwayland-dev on Debian/Ubuntu, wayland on Arch/NixOS)");
-        break :blk std.fs.path.join(b.allocator, &.{ dir, "wayland.xml" }) catch @panic("OOM");
+    const wayland_xml_path = blk: {
+        var code: u8 = undefined;
+        const raw = b.runAllowFail(&.{ "sh", "-c", "echo -n $WAYLAND_XML" }, &code, .ignore) catch
+            @panic("WAYLAND_XML not set. Run inside nix-shell.");
+        break :blk std.mem.trimEnd(u8, raw, &[_]u8{ '\n', '\r' });
     };
-    const wayland_protocols = pkgConfigVar(b, "wayland-protocols", "pkgdatadir") orelse
-        @panic("wayland-protocols not found via pkg-config. Install wayland-protocols on your distro");
+    const wayland_protocols_path = blk: {
+        var code: u8 = undefined;
+        const raw = b.runAllowFail(&.{ "sh", "-c", "echo -n $WAYLAND_PROTOCOLS" }, &code, .ignore) catch
+            @panic("WAYLAND_PROTOCOLS not set. Run inside nix-shell.");
+        break :blk std.mem.trimEnd(u8, raw, &[_]u8{ '\n', '\r' });
+    };
 
     const scanner = Scanner.create(b, .{
-        .wayland_xml = .{ .cwd_relative = wayland_xml },
-        .wayland_protocols = .{ .cwd_relative = wayland_protocols },
+        .wayland_xml = .{ .cwd_relative = wayland_xml_path },
+        .wayland_protocols = .{ .cwd_relative = wayland_protocols_path },
     });
 
     const wayland = b.createModule(.{ .root_source_file = scanner.result });

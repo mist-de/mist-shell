@@ -2,11 +2,8 @@
 
 pkgs.mkShell {
   buildInputs = with pkgs; [
-    # Zig toolchain
     zig
     zls
-
-    # System libraries for Mist
     wayland
     wayland-scanner
     wayland-protocols
@@ -14,10 +11,11 @@ pkgs.mkShell {
     freetype
     harfbuzz
     pkg-config
-
-    # Compositor for testing
     river
   ];
+
+  WAYLAND_XML = "${pkgs.wayland-scanner}/share/wayland/wayland.xml";
+  WAYLAND_PROTOCOLS = "${pkgs.wayland-protocols}/share/wayland-protocols";
 
   shellHook = ''
     echo "Mist DE development shell"

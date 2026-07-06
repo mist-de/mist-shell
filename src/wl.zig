@@ -47,6 +47,27 @@ pub const OutputInfo = struct {
     changed: bool = true,
 };
 
+pub const max_toplevels = 32;
+
+pub const ToplevelInfo = struct {
+    handle: *zwlr.ForeignToplevelHandleV1,
+    title: [256]u8 = .{0} ** 256,
+    app_id: [256]u8 = .{0} ** 256,
+    title_len: usize = 0,
+    app_id_len: usize = 0,
+    is_active: bool = false,
+    is_closed: bool = false,
+};
+
+pub const WorkspaceInfo = struct {
+    handle: *ext.WorkspaceHandleV1,
+    name: [128]u8 = .{0} ** 128,
+    name_len: usize = 0,
+    active: bool = false,
+    ws_id: [128]u8 = .{0} ** 128,
+    ws_id_len: usize = 0,
+};
+
 pub const Context = struct {
     display: *wl.Display,
     registry: *wl.Registry,
@@ -69,6 +90,14 @@ pub const Context = struct {
     last_cursor_shape: ?CursorShape = null,
     pointer_over_popup: bool = false,
 
+    toplevels: [max_toplevels]ToplevelInfo = undefined,
+    toplevel_count: usize = 0,
+    active_toplevel: ?usize = null,
+
+    workspaces: [16]WorkspaceInfo = undefined,
+    workspace_count: usize = 0,
+    active_workspace: ?usize = null,
+
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, self: *Context) !void {
@@ -80,6 +109,19 @@ pub const Context = struct {
         };
 
         self.registry.setListener(*Context, registryListener, self);
+        self.roundtrip();
+
+        // Set up foreign toplevel manager listener
+        if (self.foreign_toplevel) |ftm| {
+            ftm.setListener(*Context, foreignToplevelManagerListener, self);
+        }
+
+        // Set up workspace manager listener
+        if (self.workspace_manager) |wsm| {
+            wsm.setListener(*Context, workspaceManagerListener, self);
+        }
+
+        // Roundtrip again to get initial toplevel/workspace state
         self.roundtrip();
     }
 
@@ -208,6 +250,134 @@ fn outputListener(output: *wl.Output, event: wl.Output.Event, ctx: *Context) voi
             std.log.info("output scale: {d}", .{scale_ev.factor});
         },
         .description, .done => {},
+    }
+}
+
+fn foreignToplevelManagerListener(manager: *zwlr.ForeignToplevelManagerV1, event: zwlr.ForeignToplevelManagerV1.Event, ctx: *Context) void {
+    _ = manager;
+    switch (event) {
+        .toplevel => |ev| {
+            if (ctx.toplevel_count >= max_toplevels) return;
+            const info = &ctx.toplevels[ctx.toplevel_count];
+            info.* = .{ .handle = ev.toplevel };
+            ev.toplevel.setListener(*Context, toplevelHandleListener, ctx);
+            ctx.toplevel_count += 1;
+            std.log.info("foreign toplevel: new handle #{d}", .{ctx.toplevel_count - 1});
+        },
+        .finished => {
+            ctx.foreign_toplevel = null;
+        },
+    }
+}
+
+fn toplevelHandleListener(handle: *zwlr.ForeignToplevelHandleV1, event: zwlr.ForeignToplevelHandleV1.Event, ctx: *Context) void {
+    // Find the toplevel info for this handle
+    const idx = for (0..ctx.toplevel_count) |i| {
+        if (ctx.toplevels[i].handle == handle) break i;
+    } else return;
+
+    const info = &ctx.toplevels[idx];
+    switch (event) {
+        .title => |ev| {
+            const src = std.mem.sliceTo(ev.title, 0);
+            const len = @min(src.len, info.title.len - 1);
+            @memcpy(info.title[0..len], src[0..len]);
+            info.title[len] = 0;
+            info.title_len = len;
+            std.log.info("toplevel title: '{s}'", .{src});
+        },
+        .app_id => |ev| {
+            const src = std.mem.sliceTo(ev.app_id, 0);
+            const len = @min(src.len, info.app_id.len - 1);
+            @memcpy(info.app_id[0..len], src[0..len]);
+            info.app_id[len] = 0;
+            info.app_id_len = len;
+            std.log.info("toplevel app_id: '{s}'", .{src});
+        },
+        .state => |ev| {
+            // ev.state is a wl_array of u32 state values
+            // State values: 0=maximized, 1=minimized, 2=fullscreen, 3=active
+            var is_active = false;
+            const states = ev.state.data orelse return;
+            const state_bytes = @as([*]const u8, @ptrCast(states))[0..ev.state.size];
+            var i: usize = 0;
+            while (i + 4 <= state_bytes.len) : (i += 4) {
+                const state_val = std.mem.readInt(u32, state_bytes[i..][0..4], .little);
+                if (state_val == 3) is_active = true; // 3 = active
+            }
+            info.is_active = is_active;
+            if (is_active) {
+                ctx.active_toplevel = idx;
+            } else if (ctx.active_toplevel == idx) {
+                ctx.active_toplevel = null;
+            }
+        },
+        .done => {},
+        .closed => {
+            info.is_closed = true;
+            // Remove this toplevel from the list
+            if (ctx.active_toplevel == idx) ctx.active_toplevel = null;
+            // Shift remaining entries
+            var j = idx;
+            while (j + 1 < ctx.toplevel_count) : (j += 1) {
+                ctx.toplevels[j] = ctx.toplevels[j + 1];
+            }
+            ctx.toplevel_count -= 1;
+            // Update active_toplevel index if needed
+            if (ctx.active_toplevel) |at| {
+                if (at > idx) ctx.active_toplevel = at - 1;
+            }
+            handle.destroy();
+        },
+        .output_enter, .output_leave, .parent => {},
+    }
+}
+
+fn workspaceManagerListener(manager: *ext.WorkspaceManagerV1, event: ext.WorkspaceManagerV1.Event, ctx: *Context) void {
+    _ = manager;
+    switch (event) {
+        .workspace => |ev| {
+            if (ctx.workspace_count >= 16) return;
+            const info = &ctx.workspaces[ctx.workspace_count];
+            info.* = .{ .handle = ev.workspace };
+            ev.workspace.setListener(*Context, workspaceHandleListener, ctx);
+            ctx.workspace_count += 1;
+            std.log.info("workspace: new handle #{d}", .{ctx.workspace_count - 1});
+        },
+        .workspace_group, .done, .finished => {},
+    }
+}
+
+fn workspaceHandleListener(handle: *ext.WorkspaceHandleV1, event: ext.WorkspaceHandleV1.Event, ctx: *Context) void {
+    const idx = for (0..ctx.workspace_count) |i| {
+        if (ctx.workspaces[i].handle == handle) break i;
+    } else return;
+
+    const info = &ctx.workspaces[idx];
+    switch (event) {
+        .name => |ev| {
+            const src = std.mem.sliceTo(ev.name, 0);
+            const len = @min(src.len, info.name.len - 1);
+            @memcpy(info.name[0..len], src[0..len]);
+            info.name[len] = 0;
+            info.name_len = len;
+        },
+        .state => |ev| {
+            info.active = ev.state.active;
+            if (ev.state.active) {
+                ctx.active_workspace = idx;
+            } else if (ctx.active_workspace == idx) {
+                ctx.active_workspace = null;
+            }
+        },
+        .id => |ev| {
+            const src = std.mem.span(ev.id);
+            const len = @min(src.len, info.ws_id.len - 1);
+            @memcpy(info.ws_id[0..len], src[0..len]);
+            info.ws_id[len] = 0;
+            info.ws_id_len = len;
+        },
+        .removed, .capabilities, .coordinates => {},
     }
 }
 

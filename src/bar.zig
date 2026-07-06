@@ -50,16 +50,27 @@ pub const Bar = struct {
 
         bar.layer = try LayerSurface.create(ctx, output, anchor, cfg.height);
         bar.rect = .{ .x = 0, .y = 0, .width = 0, .height = cfg.height };
+
+        // Load fonts with error logging
         {
             if (config_mod.resolveFontPath(allocator, cfg.font_regular)) |fp| {
                 defer allocator.free(fp);
-                bar.font = Font.init(allocator, fp, cfg.font_size) catch null;
+                bar.font = Font.init(allocator, fp, cfg.font_size) catch |err| blk: {
+                    std.log.err("Failed to load regular font '{s}': {any}", .{ fp, err });
+                    break :blk null;
+                };
             } else |_| {}
             if (config_mod.resolveFontPath(allocator, cfg.font_icon)) |fp| {
                 defer allocator.free(fp);
-                bar.font_icon = Font.init(allocator, fp, cfg.font_size) catch null;
+                bar.font_icon = Font.init(allocator, fp, cfg.font_size) catch |err| blk: {
+                    std.log.err("Failed to load icon font '{s}': {any}", .{ fp, err });
+                    break :blk null;
+                };
             } else |_| {}
         }
+
+        if (bar.font == null) std.log.err("NO REGULAR FONT LOADED - text will not render", .{});
+        if (bar.font_icon == null) std.log.err("NO ICON FONT LOADED", .{});
 
         return bar;
     }
@@ -95,7 +106,9 @@ pub const Bar = struct {
 
         canvas.fill(Color.transparent);
 
-        // ── End-4 M3 colors (exact from Appearance.qml) ──
+        // ════════════════════════════════════════════════════════
+        // Exact M3 colors from end-4 Appearance.qml
+        // ════════════════════════════════════════════════════════
         const col_layer1 = Color.rgba(0x1c, 0x1b, 0x1c, 0xE0);
         const col_on_layer0 = Color.rgba(0xe6, 0xe1, 0xe1, 0xFF);
         const col_on_layer1 = Color.rgba(0xcb, 0xc5, 0xca, 0xFF);
@@ -106,34 +119,49 @@ pub const Bar = struct {
         const col_on_secondary_container = Color.rgba(0xec, 0xe6, 0xe9, 0xFF);
         const col_outline_variant = Color.rgba(0x49, 0x46, 0x4a, 0xFF);
         const col_outline = Color.rgba(0x94, 0x8f, 0x94, 0xFF);
+        const col_subtext = col_outline; // colSubtext = m3outline
 
         const bar_y: i32 = 0;
         const screen_rounding: i32 = 23;
 
         // ════════════════════════════════════════════════════════
-        // LEFT SECTION: sidebar button + active window
+        // LEFT SECTION: Sidebar button + Active window title
         // ════════════════════════════════════════════════════════
-        // LeftSidebarButton: RippleButton full radius (9999)
-        // customIcon 19.5x19.5, buttonPadding 5 each side → 30px total
-        // Layout.leftMargin = screenRounding
+        // LeftSidebarButton: RippleButton, full radius (9999)
+        // customIcon 19.5x19.5, buttonPadding 5 → total ~30px
+        // Layout.leftMargin = screenRounding = 23
         const sidebar_x: i32 = screen_rounding;
-        const sidebar_btn_w: i32 = 30;
-        const sidebar_icon_cx = sidebar_x + @divTrunc(sidebar_btn_w, 2);
-        const sidebar_icon_cy = @divTrunc(bar_h, 2);
-        // Background is transparent (RippleButton default, only colLayer1Hover when hovered)
-        // CustomIcon 19.5px (approx 10px radius), colOnLayer0
-        canvas.fillCircle(sidebar_icon_cx, sidebar_icon_cy, 10, col_on_layer0);
+        const sidebar_btn_size: i32 = 30;
+        const sidebar_icon_r: i32 = 10; // 19.5/2 ≈ 10
+        const sidebar_cx = sidebar_x + @divTrunc(sidebar_btn_size, 2);
+        const sidebar_cy = @divTrunc(bar_h, 2);
+        // Icon: colOnLayer0, circle
+        canvas.fillCircle(sidebar_cx, sidebar_cy, sidebar_icon_r, col_on_layer0);
 
-        // ActiveWindow: Layout.leftMargin=10, Layout.rightMargin=screenRounding
-        // App name (colSubtext = outline, 15px) + title (colOnLayer0, 17px), spacing=-4
-        // Fills remaining width between left sidebar and center section
-        const aw_x = sidebar_x + sidebar_btn_w + 10;
-        const aw_right = @divTrunc(bar_w - screen_rounding, 2) - 80;
-        if (aw_right > aw_x) {
-            if (self.font) |*f| {
-                const tbl = @divTrunc(bar_h - f.lineHeight(), 2) + f.baselineOffset();
-                text_mod.renderText(&canvas, f, "Mist DE", aw_x, tbl, col_on_layer1);
-            }
+        // ActiveWindow: ColumnLayout spacing=-4 (overlapping rows)
+        // Layout.leftMargin=10, Layout.rightMargin=screenRounding
+        const aw_x = sidebar_x + sidebar_btn_size + 10;
+        const aw_right_limit = @divTrunc(bar_w, 2) - 80;
+        if (aw_right_limit > aw_x and self.font != null) {
+            const f_ptr = &self.font.?;
+
+            const group_h = 12 + 15 - 4;
+            const group_top = @divTrunc(bar_h - group_h, 2);
+            const row1_y = group_top + 12;
+            const row2_y = row1_y - 4 + 15;
+
+            // Get live window info from foreign toplevel
+            const app_name: []const u8 = if (ctx.active_toplevel) |at|
+                std.mem.sliceTo(&ctx.toplevels[at].app_id, 0)
+            else
+                "mist";
+            const window_title: []const u8 = if (ctx.active_toplevel) |at|
+                std.mem.sliceTo(&ctx.toplevels[at].title, 0)
+            else
+                "Mist DE";
+
+            text_mod.renderText(&canvas, f_ptr, app_name, aw_x, row1_y, col_subtext);
+            text_mod.renderText(&canvas, f_ptr, window_title, aw_x, row2_y, col_on_layer0);
         }
 
         // ════════════════════════════════════════════════════════
@@ -141,15 +169,17 @@ pub const Bar = struct {
         // ════════════════════════════════════════════════════════
         const center_spacing: i32 = 4;
         const center_mod_w: i32 = if (bar_w > 1200) 360 else if (bar_w > 1000) 280 else 190;
+
+        // Workspaces: 26px buttons, 4px padding inside BarGroup
         const ws_btn_size: i32 = 26;
         const ws_count: i32 = 5;
-        const ws_total = ws_btn_size * ws_count;
         const ws_bargroup_padding: i32 = 4;
-        const ws_w = ws_total + ws_bargroup_padding * 2;
+        const ws_w = ws_btn_size * ws_count + ws_bargroup_padding * 2;
+
         const total_center = center_mod_w + center_spacing + ws_w + center_spacing + center_mod_w;
         const center_x = @divTrunc(bar_w - total_center, 2);
 
-        // BarGroup: 4px vertical margin, 12px radius, colLayer1 bg
+        // BarGroup background: 4px vertical margin, 12px radius
         const group_bg_y = bar_y + 4;
         const group_bg_h = bar_h - 8;
         const group_radius: i32 = 12;
@@ -158,43 +188,44 @@ pub const Bar = struct {
         const lc_x = center_x;
         canvas.fillRoundedRect(lc_x, group_bg_y, center_mod_w, group_bg_h, group_radius, col_layer1);
 
-        // Resources: 3 items in RowLayout
-        // Resource internal: ClippedFilledCircularProgress 20px + 2px spacing + text
-        // Resources wrapper: anchors.leftMargin=4, anchors.rightMargin=4
+        // Resources: 3 items, each with 20px ring + 2px spacing + text
+        // Resources wrapper: leftMargin=4, rightMargin=4
         // Between resources: Layout.leftMargin=6 when shown
-        // Media: 20px ring + 4px spacing + song title
-        var res_x = lc_x + 5;
-        const res_y = @divTrunc(bar_h, 2);
+        var res_x = lc_x + 5; // 4px margin + 1px extra for visual
+        const res_center_y = @divTrunc(bar_h, 2);
 
-        // Each resource: 20px ring (colOnSecondaryContainer) + text ("52" at small=15px)
-        // ClippedFilledCircularProgress: implicitSize=20, lineWidth=2 (unsharpen)
-        // arcRadius = 10 - 1 - 0.5 = 8.5, colPrimary = colOnSecondaryContainer
-        // Background circle = transparentize(colPrimary, 0.5) = outline_variant
-        // The ring is a PIE shape (filled from center), not a stroke
-        // For simplicity: draw thick ring with fillRing
         for (0..3) |ri| {
-            // Track: outline_variant ring (outer=10, inner=8)
-            canvas.fillRing(res_x + 10, res_y, 8, 10, col_outline_variant);
-            // Progress: colOnSecondaryContainer, full circle for now (placeholder)
-            canvas.fillRing(res_x + 10, res_y, 8, 9, col_on_secondary_container);
-            // Center icon dot (MaterialSymbol normal=16px, colOnSecondaryContainer)
-            canvas.fillCircle(res_x + 10, res_y, 3, col_on_secondary_container);
-            // Percentage text "52" (colOnLayer1, small=15px)
+            // ClippedFilledCircularProgress: 20px, lineWidth=2
+            // arcRadius = 10 - 1 - 0.5 = 8.5
+            const ring_outer: i32 = 10;
+            const ring_inner: i32 = 8; // outer - lineWidth = 10 - 2 = 8
+            const ring_cx = res_x + ring_outer;
+            const ring_cy = res_center_y;
+
+            // Track: outline_variant
+            canvas.fillRing(ring_cx, ring_cy, ring_inner, ring_outer, col_outline_variant);
+            // Progress: colOnSecondaryContainer, full circle placeholder
+            canvas.fillRing(ring_cx, ring_cy, ring_inner, ring_outer - 1, col_on_secondary_container);
+            // Center dot: MaterialSymbol 16px → 3px radius placeholder
+            canvas.fillCircle(ring_cx, ring_cy, 3, col_on_secondary_container);
+
+            // Percentage text "52" (colOnLayer1, 15px)
             if (self.font) |*f| {
                 const tbl = @divTrunc(bar_h - f.lineHeight(), 2) + f.baselineOffset();
-                text_mod.renderText(&canvas, f, "52", res_x + 22, tbl, col_on_layer1);
+                text_mod.renderText(&canvas, f, "52", res_x + ring_outer * 2 + 2, tbl, col_on_layer1);
             }
-            res_x += 42;
-            if (ri < 2) res_x += 6;
+            res_x += 42; // 20px ring + 2px spacing + 20px text area
+            if (ri < 2) res_x += 6; // inter-resource margin
         }
 
-        // Media: circular progress (20px) + song title
+        // Media: 20px ring + 4px spacing + song title
         if (center_mod_w > 200) {
             res_x += 6;
-            canvas.fillRing(res_x + 10, res_y, 8, 10, col_outline_variant);
-            canvas.fillRing(res_x + 10, res_y, 8, 9, col_on_secondary_container);
-            canvas.fillCircle(res_x + 10, res_y, 3, col_on_secondary_container);
-            res_x += 24;
+            const media_ring_cx = res_x + 10;
+            canvas.fillRing(media_ring_cx, res_center_y, 8, 10, col_outline_variant);
+            canvas.fillRing(media_ring_cx, res_center_y, 8, 9, col_on_secondary_container);
+            canvas.fillCircle(media_ring_cx, res_center_y, 3, col_on_secondary_container);
+            res_x += 24; // 20px ring + 4px spacing
             const media_text_w = lc_x + center_mod_w - res_x - 5;
             if (media_text_w > 10) {
                 if (self.font) |*f| {
@@ -211,13 +242,27 @@ pub const Bar = struct {
         const ws_cell_y = bar_y + @divTrunc(bar_h - ws_btn_size, 2);
         const ws_start_x = mc_x + ws_bargroup_padding;
 
-        // Simulate: workspaces 0,1,2 occupied, workspace 0 active
-        const occupied = [_]bool{ true, true, true, false, false };
-        const active_ws: usize = 0;
+        // Use live workspace data from workspace protocol
+        const ws_display_count: usize = @min(@as(usize, @intCast(ws_count)), ctx.workspace_count);
+        var occupied_buf: [16]bool = .{false} ** 16;
+        var active_ws: usize = 0;
+        for (0..ws_display_count) |wi| {
+            const ws_info = &ctx.workspaces[wi];
+            occupied_buf[wi] = ws_info.name_len > 0; // has a name = exists
+            if (ws_info.active) active_ws = wi;
+        }
+        // Fallback: if no workspace data, show 3 occupied + 2 empty
+        if (ws_display_count == 0) {
+            occupied_buf[0] = true;
+            occupied_buf[1] = true;
+            occupied_buf[2] = true;
+            active_ws = 0;
+        }
+        const occupied = occupied_buf;
 
         const half_btn = @divTrunc(ws_btn_size, 2);
 
-        // ── Draw occupied backgrounds as grouped rounded rects (NO alpha overlap) ──
+        // Occupied backgrounds as grouped rounded rects (NO alpha overlap)
         var group_start: ?usize = null;
         for (0..6) |i| {
             const at_end = i == 5;
@@ -238,9 +283,7 @@ pub const Bar = struct {
             }
         }
 
-        // ── Active workspace indicator ──
-        // 22x22 pill (radius=full), colPrimary, 2px margin from button edge
-        // Vertical+horizontal centered within the 26x26 button area
+        // Active workspace indicator: 22x22 pill, colPrimary, 2px margin
         const ws_active_margin: i32 = 2;
         const ws_active_size = ws_btn_size - ws_active_margin * 2;
         {
@@ -249,9 +292,7 @@ pub const Bar = struct {
             canvas.fillRoundedRect(active_x, active_y, ws_active_size, ws_active_size, 9999, col_primary);
         }
 
-        // ── Workspace dots ──
-        // width = workspaceButtonWidth * 0.18 = 26 * 0.18 = 4.68 ≈ 5px
-        // Colors: active→colOnPrimary, occupied→colOnSecondaryContainer, empty→colOnLayer1Inactive
+        // Workspace dots: 5px diameter (26 * 0.18 ≈ 4.68)
         const dot_diam: i32 = 5;
         const dot_r = @divTrunc(dot_diam, 2);
         for (0..5) |i| {
@@ -267,18 +308,36 @@ pub const Bar = struct {
             canvas.fillCircle(dot_cx, dot_cy, dot_r, dot_color);
         }
 
-        // ── RIGHT CENTER GROUP: Clock + UtilButtons + Battery ──
+        // ── RIGHT CENTER GROUP: Clock + Battery ──
         const rc_x = mc_x + ws_w + center_spacing;
         canvas.fillRoundedRect(rc_x, group_bg_y, center_mod_w, group_bg_h, group_radius, col_layer1);
 
-        // BatteryIndicator: ClippedProgressBar, anchors.centerIn parent
-        // valueBarWidth=30, valueBarHeight=18, colOnSecondaryContainer highlight
-        // trackColor = transparentize(highlightColor, 0.5) = outline_variant
-        // font pixelSize=13, shows percentage text
+        // BatteryIndicator: ClippedProgressBar, centered in parent
+        // valueBarWidth=30, valueBarHeight=18, radius=9999 (pill)
         const bat_w: i32 = 30;
         const bat_h: i32 = 18;
-        // Right-aligned with 5px padding from right edge of group
-        const bat_x = rc_x + center_mod_w - bat_w - 5;
+
+        // ClockWidget: RowLayout spacing=4, centered
+        // Time (large=17px) + "•" (small=15px) + Date (small=15px)
+        if (self.font) |*f| {
+            const tbl = @divTrunc(bar_h - f.lineHeight(), 2) + f.baselineOffset();
+            const clock_str = "12:34";
+            const sep_str = "•";
+            const date_str = "Mon 6 Jul";
+            const clock_w = text_mod.textWidth(f, clock_str);
+            const sep_w = text_mod.textWidth(f, sep_str);
+            const date_w = text_mod.textWidth(f, date_str);
+            const total_clock_w = clock_w + 4 + sep_w + 4 + date_w;
+            var cx = rc_x + @divTrunc(center_mod_w - total_clock_w, 2);
+            text_mod.renderText(&canvas, f, clock_str, cx, tbl, col_on_layer1);
+            cx += clock_w + 4;
+            text_mod.renderText(&canvas, f, sep_str, cx, tbl, col_on_layer1);
+            cx += sep_w + 4;
+            text_mod.renderText(&canvas, f, date_str, cx, tbl, col_on_layer1);
+        }
+
+        // Battery (right-aligned in group)
+        const bat_x = rc_x + center_mod_w - bat_w - 8;
         const bat_y_pos = @divTrunc(bar_h - bat_h, 2);
         // Track (background)
         canvas.fillRoundedRect(bat_x, bat_y_pos, bat_w, bat_h, 9999, col_outline_variant);
@@ -286,72 +345,59 @@ pub const Bar = struct {
         const bat_pct: i32 = 80;
         const bat_fill_w = @divTrunc((bat_w - 4) * bat_pct, 100);
         canvas.fillRoundedRect(bat_x + 2, bat_y_pos + 2, bat_fill_w, bat_h - 4, 9999, col_on_secondary_container);
-        // Percentage text "80" (13px, DemiBold for 2 chars)
+        // Percentage text "80%" (13px, DemiBold for 3 chars)
         if (self.font) |*f| {
             const tbl = bat_y_pos + @divTrunc(bat_h - f.lineHeight(), 2) + f.baselineOffset();
             text_mod.renderText(&canvas, f, "80%", bat_x + 2, tbl, col_on_layer1);
         }
 
-        // ClockWidget: RowLayout spacing=4, anchors.centerIn parent
-        // Time (large=17px) + "•" (small=15px) + Date (small=15px)
-        // All colOnLayer1
-        const clock_x = rc_x + 5;
-        if (self.font) |*f| {
-            const tbl = @divTrunc(bar_h - f.lineHeight(), 2) + f.baselineOffset();
-            var cx = clock_x;
-            text_mod.renderText(&canvas, f, "12:34", cx, tbl, col_on_layer1);
-            cx += text_mod.textWidth(f, "12:34") + 4;
-            text_mod.renderText(&canvas, f, "•", cx, tbl, col_on_layer1);
-            cx += text_mod.textWidth(f, "•") + 4;
-            text_mod.renderText(&canvas, f, "Mon 6 Jul", cx, tbl, col_on_layer1);
-        }
-
         // ════════════════════════════════════════════════════════
-        // RIGHT SECTION: SysTray + indicator button
-        // ════════════════════════════════════════════════════════
+        // RIGHT SECTION: RTL coordinate accumulation
         // RowLayout layoutDirection=RightToLeft, spacing=5
-        //   RippleButton (rightmost, Layout.rightMargin=screenRounding)
-        //   SysTray (to the left)
-        //   Item spacer (fills remaining)
-        // RippleButton: indicatorsRowLayout, realSpacing=15
-        //   6 icons at larger=19px: volume_off, mic_off, xkb, notification, network, bluetooth
-        //   10px padding each side
-        // SysTray: GridLayout columnSpacing=15
-        //   RippleButton (overflow) 24x24
-        //   3+ pinned items 24x24 each
-        //   Separator "•"
+        // ════════════════════════════════════════════════════════
 
-        // Right sidebar button: 19px icons at 15px spacing + 10px padding each side
+        // Start from right edge, accumulate leftward
+        var rtl_x: i32 = bar_w - screen_rounding;
+
+        // Right sidebar button: 19px icons, 15px spacing, 10px padding each side
+        // indicatorsRowLayout, realSpacing=15
         const rsb_icon_size: i32 = 19;
         const rsb_spacing: i32 = 15;
         const rsb_icons_count: i32 = 6;
         const rsb_content_w = rsb_icons_count * rsb_icon_size + (rsb_icons_count - 1) * rsb_spacing;
-        const rsb_w = rsb_content_w + 20;
-        const rsb_x = bar_w - rsb_w - screen_rounding;
+        const rsb_w = rsb_content_w + 20; // 10px padding each side
+        const rsb_x = rtl_x - rsb_w;
 
-        // Background: transparent by default (transparentize(colLayer1Hover, 1) = transparent)
-        // On hover: colLayer1Hover
+        // Draw sidebar button background on hover (transparent by default)
+        // For now, just draw the icons
         var icon_x = rsb_x + 10;
         const icon_cy = @divTrunc(bar_h, 2);
         for (0..6) |_| {
+            // Icon placeholder: filled rect (19px, colOnLayer0)
             canvas.fillRect(icon_x, icon_cy - @divTrunc(rsb_icon_size, 2), rsb_icon_size, rsb_icon_size, col_on_layer0);
             icon_x += rsb_icon_size + rsb_spacing;
         }
 
-        // SysTray: pinned items + separator
-        // GridLayout columnSpacing=15, each item 24x24
-        // RowLayout between RippleButton and spacer, with spacing=5
-        const tray_right = rsb_x - 5; // spacing between button and sys tray
-        const tray_item_size: i32 = 24;
-        // 4 items (overflow + 3 pinned), 3 gaps of 15px, 6px left margin
-        const tray_items: i32 = 4;
-        const tray_gaps = tray_items - 1;
-        const tray_content_w = tray_items * tray_item_size + tray_gaps * 15;
-        const tray_icons_x = tray_right - tray_content_w;
-        var tix = tray_icons_x;
-        for (0..tray_items) |_| {
+        rtl_x = rsb_x - 5; // spacing between button and sys tray
+
+        // SysTray: GridLayout columnSpacing=15, items 20x20
+        // Overflow button 24x24
+        const tray_item_size: i32 = 20;
+        const tray_overflow_size: i32 = 24;
+        const tray_col_spacing: i32 = 15;
+        // 1 overflow + 3 pinned = 4 items
+        const tray_total_w = tray_overflow_size + tray_col_spacing + 3 * tray_item_size + 2 * tray_col_spacing;
+        const tray_x = rtl_x - tray_total_w;
+
+        // Draw tray items
+        var tix = tray_x;
+        // Overflow button (24x24)
+        canvas.fillCircle(tix + @divTrunc(tray_overflow_size, 2), icon_cy, @divTrunc(tray_overflow_size, 2), col_outline);
+        tix += tray_overflow_size + tray_col_spacing;
+        // Pinned items (20x20 each)
+        for (0..3) |_| {
             canvas.fillCircle(tix + @divTrunc(tray_item_size, 2), icon_cy, @divTrunc(tray_item_size, 2), col_outline);
-            tix += tray_item_size + 15;
+            tix += tray_item_size + tray_col_spacing;
         }
 
         // ════════════════════════════════════════════════════════

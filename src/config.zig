@@ -30,7 +30,35 @@ pub fn getMut() *Config {
     return &global_config;
 }
 
+fn fileExists(path: []const u8) bool {
+    var buf: [std.fs.max_path_bytes + 1]u8 = undefined;
+    if (path.len >= buf.len) return false;
+    @memcpy(buf[0..path.len], path);
+    buf[path.len] = 0;
+    const path_z: [*:0]const u8 = @ptrCast(&buf);
+    return std.c.access(path_z, std.c.F_OK) == 0;
+}
+
 pub fn resolveFontPath(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
+    // 1. fonts/ relative to CWD
+    const cwd_path = try std.fs.path.join(allocator, &.{ "fonts", name });
+    if (fileExists(cwd_path)) return cwd_path;
+    allocator.free(cwd_path);
+
+    // 2. zig-out/fonts/ relative to CWD
+    const zig_out = try std.fs.path.join(allocator, &.{ "zig-out", "fonts", name });
+    if (fileExists(zig_out)) return zig_out;
+    allocator.free(zig_out);
+
+    // 3. ~/.fonts/
+    if (std.c.getenv("HOME")) |home_ptr| {
+        const home = std.mem.span(home_ptr);
+        const home_path = try std.fs.path.join(allocator, &.{ home, ".fonts", name });
+        if (fileExists(home_path)) return home_path;
+        allocator.free(home_path);
+    }
+
+    // 4. Fallback (will fail at FT_New_Face)
     return std.fs.path.join(allocator, &.{ "fonts", name });
 }
 
