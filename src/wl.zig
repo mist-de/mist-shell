@@ -112,6 +112,8 @@ pub const Context = struct {
     /// Clickable area of the media widget (set during draw, consumed by handleClick)
     media_area_x0: i32 = 0,
     media_area_x1: i32 = 0,
+    media_icon_x0: i32 = 0,
+    media_icon_x1: i32 = 0,
 
     allocator: std.mem.Allocator,
 

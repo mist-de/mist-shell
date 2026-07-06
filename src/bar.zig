@@ -350,6 +350,8 @@ pub const Bar = struct {
             ctx.media_area_x1 = lcX + centerSideModuleWidth;
             resX += 8;
             const mediaRingCX: i32 = resX + 10;
+            ctx.media_icon_x0 = mediaRingCX - 10;
+            ctx.media_icon_x1 = mediaRingCX + 10;
             const mediaProgress: f32 = if (mpris.has_player and mpris.length > 0) @as(f32, @floatFromInt(mpris.position)) / @as(f32, @floatFromInt(mpris.length)) else 0;
             canvas.fillCircle(mediaRingCX, centerY, 10.0, Color.rgba(0xec, 0xe6, 0xe9, 0x80));
             canvas.fillArc(mediaRingCX, centerY, 0, 10, half_pi, -two_pi * mediaProgress, colOnSecondaryContainer);
@@ -629,13 +631,13 @@ fn pointerListener(pointer: *wl.Pointer, event: wl.Pointer.Event, ctx: *Context)
     switch (event) {
         .enter => |enter| {
             ctx.last_enter_serial = enter.serial;
-            ctx.pointer_x = @intFromEnum(enter.surface_x);
-            ctx.pointer_y = @intFromEnum(enter.surface_y);
+            ctx.pointer_x = enter.surface_x.toInt();
+            ctx.pointer_y = enter.surface_y.toInt();
             setCursorShape(ctx, enter.serial, .default);
         },
         .motion => |motion| {
-            ctx.pointer_x = @intFromEnum(motion.surface_x);
-            ctx.pointer_y = @intFromEnum(motion.surface_y);
+            ctx.pointer_x = motion.surface_x.toInt();
+            ctx.pointer_y = motion.surface_y.toInt();
         },
         .button => |btn| {
             if (btn.state == .pressed) {
@@ -681,13 +683,17 @@ fn handleClick(ctx: *Context, x: i32, y: i32, button: u32) void {
     // Media player controls (end-4: middle=playPause, right/forward=next, back=prev, left=mediaControls)
     if (x >= ctx.media_area_x0 and x < ctx.media_area_x1 and y >= 0 and y < bar_h) {
         if (ctx.mpris) |mpris| {
-            if (button == 0x112) { // BTN_MIDDLE → play/pause
+            if (button == 0x110) { // BTN_LEFT → media controls popup (or play/pause on icon)
+                if (x >= ctx.media_icon_x0 and x < ctx.media_icon_x1) {
+                    mpris.playPause();
+                } // else: reserved for media controls popup (end-4: GlobalStates.mediaControlsOpen)
+            } else if (button == 0x112) { // BTN_MIDDLE → play/pause
                 mpris.playPause();
             } else if (button == 0x111 or button == 0x115) { // BTN_RIGHT or BTN_FORWARD → next
                 mpris.next();
             } else if (button == 0x116) { // BTN_BACK → previous
                 mpris.previous();
-            } // BTN_LEFT (0x110) is reserved for media controls popup (end-4: GlobalStates.mediaControlsOpen)
+            }
         }
         return;
     }
