@@ -53,7 +53,11 @@ pub fn main() !void {
             break;
         }
 
-        // Only redraw if any bar was marked dirty by a configure event
+        // Redraw when workspace/toplevel state changed
+        if (ctx.bar_dirty) {
+            bar_mod.markAllDirty(&ctx);
+            ctx.bar_dirty = false;
+        }
         bar_mod.drawOutputs(&ctx);
     }
 

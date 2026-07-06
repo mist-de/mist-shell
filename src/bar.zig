@@ -110,6 +110,7 @@ pub const Bar = struct {
     buffer: ?ShmBuffer = null,
     rect: Rect = .zero,
     font: ?Font = null,
+    font_small: ?Font = null,
     font_icon: ?Font = null,
     font_material: ?Font = null,
     needs_full_redraw: bool = true,
@@ -134,9 +135,13 @@ pub const Bar = struct {
                 defer allocator.free(fp);
                 bar.font = Font.init(allocator, fp, cfg.font_size) catch null;
             } else |_| {}
+            if (config_mod.resolveFontPath(allocator, cfg.font_regular)) |fp| {
+                defer allocator.free(fp);
+                bar.font_small = Font.init(allocator, fp, cfg.font_size_small) catch null;
+            } else |_| {}
             if (config_mod.resolveFontPath(allocator, cfg.font_icon)) |fp| {
                 defer allocator.free(fp);
-                bar.font_icon = Font.init(allocator, fp, cfg.font_size) catch null;
+                bar.font_icon = Font.init(allocator, fp, cfg.font_size_sidebar) catch null;
             } else |_| {}
             if (config_mod.resolveFontPath(allocator, cfg.font_material)) |fp| {
                 defer allocator.free(fp);
@@ -154,6 +159,7 @@ pub const Bar = struct {
     pub fn deinit(self: *Bar) void {
         if (self.buffer) |*b| b.deinit();
         if (self.font) |*f| f.deinit();
+        if (self.font_small) |*f| f.deinit();
         if (self.font_icon) |*f| f.deinit();
         if (self.font_material) |*f| f.deinit();
         self.layer.destroy();
@@ -243,11 +249,12 @@ pub const Bar = struct {
         const appName: []const u8 = if (ctx.active_toplevel) |at|
             std.mem.sliceTo(&ctx.toplevels[at].app_id, 0)
         else
-            "mist";
+            "Desktop";
+        var wsBuf: [24]u8 = undefined;
         const windowTitle: []const u8 = if (ctx.active_toplevel) |at|
             std.mem.sliceTo(&ctx.toplevels[at].title, 0)
         else
-            "Mist DE";
+            std.fmt.bufPrint(&wsBuf, "Workspace {d}", .{activeWs + 1}) catch "Workspace 1";
 
         // ═══ 1. BAR BACKGROUND ═══
         // end-4 hug mode: full-width rect with NO radius (radius: 0 in QML)
@@ -259,24 +266,31 @@ pub const Bar = struct {
         const sidebarBtnW: i32 = 30;
         const sidebarBtnX: i32 = screenRounding;
 
-        // sidebar icon (19.5px, centered in button area)
+        // sidebar icon: auto-detected distro icon at font_size_sidebar, centered (end-4 LeftSidebarButton)
         if (self.font_icon) |*fIcon| {
             const tbl = @divTrunc(bar_h - fIcon.lineHeight(), 2) + fIcon.baselineOffset();
-            render_mod.renderText(&canvas, fIcon, "\u{F313}", sidebarBtnX + @divTrunc(sidebarBtnW - 19, 2), tbl, colOnLayer0);
+            const cp = config_mod.detectDistroIcon();
+            var icon_utf8: [4]u8 = undefined;
+            const icon_utf8_len = std.unicode.utf8Encode(cp, &icon_utf8) catch 3;
+            const icon = icon_utf8[0..icon_utf8_len];
+            const iw = render_mod.textWidth(fIcon, icon);
+            render_mod.renderText(&canvas, fIcon, icon, sidebarBtnX + @divTrunc(sidebarBtnW - @as(i32, @intCast(iw)), 2), tbl, colOnLayer0);
         } else {
-            canvas.fillCircle(sidebarBtnX + @divTrunc(sidebarBtnW, 2), centerY, 10, colOnLayer0);
+            canvas.fillCircle(sidebarBtnX + @divTrunc(sidebarBtnW, 2), centerY, 10.0, colOnLayer0);
         }
 
         // Active window text (10px left margin from button)
         const awX: i32 = sidebarBtnX + sidebarBtnW + 10;
         if (useShortenedForm == 0) {
-            if (self.font) |*f| {
-                const groupH: i32 = 12 + 15 - 4;
-                const groupTop: i32 = @divTrunc(bar_h - groupH, 2);
-                const row1Y: i32 = groupTop + 12;
-                const row2Y: i32 = row1Y - 4 + 15;
-                render_mod.renderText(&canvas, f, appName, awX, row1Y, colSubtext);
-                render_mod.renderText(&canvas, f, windowTitle, awX, row2Y, colOnLayer0);
+            if (self.font_small) |*fSml| {
+                if (self.font) |*f| {
+                    const groupH: i32 = 12 + 15 - 4;
+                    const groupTop: i32 = @divTrunc(bar_h - groupH, 2);
+                    const row1Y: i32 = groupTop + 12;
+                    const row2Y: i32 = row1Y - 4 + 15;
+                    render_mod.renderText(&canvas, fSml, appName, awX, row1Y, colSubtext);
+                    render_mod.renderText(&canvas, f, windowTitle, awX, row2Y, colOnLayer0);
+                }
             }
         }
 
@@ -293,17 +307,17 @@ pub const Bar = struct {
             const ringR: i32 = 10;
             const ringCX: i32 = resX + ringR;
             // Track: filled circle at 50% alpha (end-4 transparentize colPrimary, 0.5)
-            canvas.fillCircle(ringCX, centerY, ringR, Color.rgba(0xec, 0xe6, 0xe9, 0x80));
+            canvas.fillCircle(ringCX, centerY, @as(f32, @floatFromInt(ringR)), Color.rgba(0xec, 0xe6, 0xe9, 0x80));
             // Progress: filled sector from center, clockwise from top (end-4 ClippedFilledCircularProgress)
             canvas.fillArc(ringCX, centerY, 0, ringR, half_pi, -two_pi * 0.52, colOnSecondaryContainer);
 
-            // Icon centered in 20x20 ring at 16px (end-4 MaterialSymbol normal)
+            // Icon: hole cutout in circle → use bg color (colLayer1) to simulate mask (end-4 OpacityMask invert)
             if (self.font_material) |*fMat| {
                 const tbl = @divTrunc(bar_h - fMat.lineHeight(), 2) + fMat.baselineOffset();
-                render_mod.renderText(&canvas, fMat, icon, ringCX - 8, tbl, colOnSecondaryContainer);
+                render_mod.renderText(&canvas, fMat, icon, ringCX - 8, tbl, colLayer1);
             }
 
-            // Percentage text at 15px (end-4 StyledText small)
+            // Percentage text at 15px, outside circle (end-4 StyledText small in RowLayout)
             if (self.font) |*f| {
                 const tbl2 = @divTrunc(bar_h - f.lineHeight(), 2) + f.baselineOffset();
                 const pctStr = "52";
@@ -319,12 +333,12 @@ pub const Bar = struct {
             resX += 6;
             const mediaRingCX: i32 = resX + 10;
             const mediaProgress: f32 = 0.42; // placeholder: 42% progress
-            canvas.fillCircle(mediaRingCX, centerY, 10, Color.rgba(0xec, 0xe6, 0xe9, 0x80));
+            canvas.fillCircle(mediaRingCX, centerY, 10.0, Color.rgba(0xec, 0xe6, 0xe9, 0x80));
             canvas.fillArc(mediaRingCX, centerY, 0, 10, half_pi, -two_pi * mediaProgress, colOnSecondaryContainer);
 
             if (self.font_material) |*fMat| {
                 const tbl = @divTrunc(bar_h - fMat.lineHeight(), 2) + fMat.baselineOffset();
-                render_mod.renderText(&canvas, fMat, "music_note", mediaRingCX - 7, tbl, colOnSecondaryContainer);
+                render_mod.renderText(&canvas, fMat, "music_note", mediaRingCX - 7, tbl, colLayer1);
             }
 
             resX += 36;
@@ -384,10 +398,10 @@ pub const Bar = struct {
             else
                 colOnLayer1Inactive;
 
-            // Dot: workspaceButtonWidth * 0.18 ≈ 4.68px diameter (end-4 exact), SDF circle
-            const dotDiam: i32 = @intFromFloat(@as(f32, @floatFromInt(wsBtnWidth)) * 0.18 + 0.5);
+            // Dot: workspaceButtonWidth * 0.18 = 4.68px diameter (end-4 exact), SDF circle
+            const dotDiam: f32 = @as(f32, @floatFromInt(wsBtnWidth)) * 0.18;
             const dotCX: i32 = btnX + @divTrunc(wsBtnWidth, 2);
-            const dotR: i32 = dotDiam / 2;
+            const dotR: f32 = dotDiam * 0.5;
             canvas.fillCircle(dotCX, centerY, dotR, textColor);
         }
 
@@ -425,11 +439,22 @@ pub const Bar = struct {
             canvas.fillRoundedRectAA(batX + 2, batY + 2, batFillW, batH - 4, fullRounding, colOnSecondaryContainer);
         }
         // Text centered: numeric only, no "%" (end-4 ClippedProgressBar text)
-        if (self.font) |*f| {
-            const tbl = batY + @divTrunc(batH - f.lineHeight(), 2) + f.baselineOffset();
-            const batStr = "80";
-            const batTW: i32 = render_mod.textWidth(f, batStr);
-            render_mod.renderText(&canvas, f, batStr, batX + @divTrunc(batW - batTW, 2), tbl, colOnLayer1);
+        // When charging: show bolt icon from material font instead (end-4 BatteryIndicator)
+        const charging = false; // TODO: read from UPower D-Bus service
+        if (charging) {
+            if (self.font_material) |*fMat| {
+                const tbl = batY + @divTrunc(batH - fMat.lineHeight(), 2) + fMat.baselineOffset();
+                const icon = "bolt";
+                const iw = render_mod.textWidth(fMat, icon);
+                render_mod.renderText(&canvas, fMat, icon, batX + @divTrunc(batW - iw, 2), tbl, colOnLayer1);
+            }
+        } else {
+            if (self.font) |*f| {
+                const tbl = batY + @divTrunc(batH - f.lineHeight(), 2) + f.baselineOffset();
+                const batStr = "80";
+                const batTW: i32 = render_mod.textWidth(f, batStr);
+                render_mod.renderText(&canvas, f, batStr, batX + @divTrunc(batW - batTW, 2), tbl, colOnLayer1);
+            }
         }
 
         // ═══ 4. RIGHT SECTION: Indicators (RTL, end-4 BarContent) ═══
@@ -474,7 +499,7 @@ pub const Bar = struct {
                 render_mod.renderText(&canvas, fMat, item, rx, tbl, colOnLayer0);
                 // badge dot: 8px circle, anchored top-right with (1,3) margins
                 const icon_top = tbl - fMat.baselineOffset();
-                canvas.fillCircle(rx + iw - 5, icon_top + 7, 4, colOnLayer0);
+                canvas.fillCircle(rx + iw - 5, icon_top + 7, 4.0, colOnLayer0);
             }
             rx -= indicatorSpacing;
 

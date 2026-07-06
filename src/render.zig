@@ -63,14 +63,14 @@ pub const Canvas = struct {
         }
     }
 
-    pub fn fillCircle(self: *Canvas, cx: i32, cy: i32, radius: i32, color: Color) void {
-        if (radius <= 0 or color.a == 0) return;
-        const x0 = @max(0, cx - radius - 1);
-        const y0 = @max(0, cy - radius - 1);
-        const x1 = @min(self.width, cx + radius + 2);
-        const y1 = @min(self.height, cy + radius + 2);
+    pub fn fillCircle(self: *Canvas, cx: i32, cy: i32, radius: f32, color: Color) void {
+        if (radius <= 0.0 or color.a == 0) return;
+        const ri: i32 = @as(i32, @intFromFloat(@ceil(radius)));
+        const x0 = @max(0, cx - ri - 1);
+        const y0 = @max(0, cy - ri - 1);
+        const x1 = @min(self.width, cx + ri + 2);
+        const y1 = @min(self.height, cy + ri + 2);
 
-        const r_f: f32 = @floatFromInt(radius);
         const cxf: f32 = @as(f32, @floatFromInt(cx)) + 0.5;
         const cyf: f32 = @as(f32, @floatFromInt(cy)) + 0.5;
 
@@ -82,7 +82,7 @@ pub const Canvas = struct {
                 const px: f32 = @as(f32, @floatFromInt(col)) + 0.5;
                 const dx = px - cxf;
                 const dy = py - cyf;
-                const dist = @sqrt(dx * dx + dy * dy) - r_f;
+                const dist = @sqrt(dx * dx + dy * dy) - radius;
                 const coverage = sdfCoverage(dist);
                 if (coverage == 0) continue;
                 const c = if (coverage == 255) color else Color{
@@ -90,50 +90,6 @@ pub const Canvas = struct {
                     .g = color.g,
                     .b = color.b,
                     .a = @intCast(@min(@as(u32, 255), @as(u32, color.a) * @as(u32, @intCast(coverage)) / 255)),
-                };
-                const offset = @as(usize, @intCast(row * self.stride + col * 4));
-                const dst = @as(*align(1) u32, @ptrCast(&self.data[offset]));
-                dst.* = blendPixel(dst.*, c);
-            }
-        }
-    }
-
-    pub fn fillRing(self: *Canvas, cx: i32, cy: i32, inner_r: i32, outer_r: i32, color: Color) void {
-        if (outer_r <= inner_r or color.a == 0) return;
-        const x0 = @max(0, cx - outer_r - 1);
-        const y0 = @max(0, cy - outer_r - 1);
-        const x1 = @min(self.width, cx + outer_r + 2);
-        const y1 = @min(self.height, cy + outer_r + 2);
-
-        const outer_f: f32 = @floatFromInt(outer_r);
-        const inner_f: f32 = @floatFromInt(inner_r);
-        const cxf: f32 = @as(f32, @floatFromInt(cx)) + 0.5;
-        const cyf: f32 = @as(f32, @floatFromInt(cy)) + 0.5;
-
-        var row: i32 = y0;
-        while (row < y1) : (row += 1) {
-            const py: f32 = @as(f32, @floatFromInt(row)) + 0.5;
-            var col: i32 = x0;
-            while (col < x1) : (col += 1) {
-                const px: f32 = @as(f32, @floatFromInt(col)) + 0.5;
-                const dx = px - cxf;
-                const dy = py - cyf;
-                const dist = @sqrt(dx * dx + dy * dy);
-
-                const cov_outer = sdfCoverage(dist - outer_f);
-                if (cov_outer == 0) continue;
-                const cov_inner: u8 = if (inner_r > 0) sdfCoverage(inner_f - dist) else 0;
-                const coverage: u32 = if (inner_r > 0)
-                    @as(u32, @intCast(cov_outer)) * @as(u32, @intCast(cov_inner)) / 255
-                else
-                    @as(u32, @intCast(cov_outer));
-
-                if (coverage == 0) continue;
-                const c = if (coverage == 255) color else Color{
-                    .r = color.r,
-                    .g = color.g,
-                    .b = color.b,
-                    .a = @intCast(@min(@as(u32, 255), @as(u32, color.a) * coverage / 255)),
                 };
                 const offset = @as(usize, @intCast(row * self.stride + col * 4));
                 const dst = @as(*align(1) u32, @ptrCast(&self.data[offset]));
@@ -221,11 +177,13 @@ pub const Canvas = struct {
     }
 
     fn sdfCoverage(dist: f32) u8 {
-        const t = 0.5 - dist;
+        // 1.5px transition width, linear (softer than smoothstep)
+        const half_w: f32 = 0.75;
+        const t = half_w - dist;
         if (t <= 0) return 0;
-        if (t >= 1) return 255;
-        const smooth = t * t * (3.0 - 2.0 * t);
-        return @intFromFloat(smooth * 255.0);
+        const w: f32 = 1.5;
+        if (t >= w) return 255;
+        return @intFromFloat(t / w * 255.0);
     }
 
     pub fn fillRoundedRectAA(self: *Canvas, x: i32, y: i32, w: i32, h: i32, radius: i32, color: Color) void {
@@ -326,6 +284,11 @@ pub const Canvas = struct {
         const cxf: f32 = @as(f32, @floatFromInt(cx)) + 0.5;
         const cyf: f32 = @as(f32, @floatFromInt(cy)) + 0.5;
 
+        const abs_sweep = @abs(sweep_angle);
+        const no_clip = abs_sweep >= std.math.tau - 0.001;
+        const full_clip = abs_sweep <= 0.001;
+        const end_angle = start_angle + sweep_angle;
+
         var row: i32 = y0;
         while (row < y1) : (row += 1) {
             const py: f32 = @as(f32, @floatFromInt(row)) + 0.5;
@@ -345,13 +308,21 @@ pub const Canvas = struct {
                     @as(u32, @intCast(cov_outer));
 
                 if (coverage > 0) {
-                    const angle = std.math.atan2(-dy, dx);
-                    var a = angle - start_angle;
-                    if (a < 0) a += std.math.tau;
-                    if (sweep_angle < 0) {
-                        if (a < std.math.tau + sweep_angle) coverage = 0;
-                    } else {
-                        if (a > sweep_angle) coverage = 0;
+                    if (full_clip) {
+                        coverage = 0;
+                    } else if (!no_clip) {
+                        const pd_start = -dx * @sin(start_angle) + dy * @cos(start_angle);
+                        const pd_end = -dx * @sin(end_angle) + dy * @cos(end_angle);
+
+                        const dist_start: f32 = if (sweep_angle < 0) pd_start else -pd_start;
+                        const dist_end: f32 = if (sweep_angle < 0) -pd_end else pd_end;
+
+                        const wedge_sdf = @max(dist_start, dist_end);
+                        if (abs_sweep > std.math.pi) {
+                            coverage = coverage * @as(u32, @intCast(sdfCoverage(-wedge_sdf))) / 255;
+                        } else {
+                            coverage = coverage * @as(u32, @intCast(sdfCoverage(wedge_sdf))) / 255;
+                        }
                     }
                 }
 

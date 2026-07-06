@@ -169,9 +169,11 @@ pub const Config = struct {
     font_bold: []const u8 = "Inter_18pt-Bold.ttf",
     font_icon: []const u8 = "NotoSansNerdFont-Regular.ttf",
     font_material: []const u8 = "MaterialSymbolsRounded.ttf",
+    font_size_small: u32 = 12,
     font_size: u32 = 15,
     font_size_large: u32 = 17,
     font_size_material: u32 = 18,
+    font_size_sidebar: u32 = 22,
 };
 
 var global_config: Config = .{};
@@ -210,4 +212,47 @@ pub fn resolveFontPath(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
 
 pub fn reload(allocator: std.mem.Allocator) void {
     _ = allocator;
+}
+
+/// Returns Nerd Font codepoint for the detected distro from /etc/os-release
+pub fn detectDistroIcon() u21 {
+    const fd = std.c.open("/etc/os-release", .{}, @as(c_uint, 0));
+    if (fd == -1) return 0xF313;
+    defer _ = std.c.close(fd);
+
+    var buf: [2048]u8 = undefined;
+    const nread = std.c.read(fd, &buf, buf.len);
+    if (nread <= 0) return 0xF313;
+    const content = buf[0..@as(usize, @intCast(nread))];
+
+    var lines = std.mem.splitScalar(u8, content, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, &[_]u8{ ' ', '\r' });
+        if (!std.mem.startsWith(u8, line, "ID=")) continue;
+
+        // Handle both ID=nixos and ID="nixos"
+        var id = line[3..];
+        if (id.len > 0 and id[0] == '"') {
+            if (id.len < 2) continue;
+            id = id[1..(id.len - 1)];
+        }
+
+        if (std.mem.eql(u8, id, "nixos")) return 0xF313;
+        if (std.mem.eql(u8, id, "arch")) return 0xF303;
+        if (std.mem.eql(u8, id, "debian")) return 0xF306;
+        if (std.mem.eql(u8, id, "fedora")) return 0xF30A;
+        if (std.mem.eql(u8, id, "ubuntu")) return 0xF31B;
+        if (std.mem.eql(u8, id, "gentoo")) return 0xF30D;
+        if (std.mem.eql(u8, id, "manjaro")) return 0xF312;
+        if (std.mem.eql(u8, id, "alpine")) return 0xF300;
+        if (std.mem.eql(u8, id, "opensuse") or std.mem.eql(u8, id, "suse")) return 0xF314;
+        if (std.mem.eql(u8, id, "kali")) return 0xF311;
+        if (std.mem.eql(u8, id, "linuxmint") or std.mem.eql(u8, id, "mint")) return 0xF30E;
+        if (std.mem.eql(u8, id, "void")) return 0xF17C;
+        if (std.mem.eql(u8, id, "endeavouros")) return 0xF310;
+
+        return 0xF313; // nixos fallback for unknown
+    }
+
+    return 0xF313; // nixos fallback
 }

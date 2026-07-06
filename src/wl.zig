@@ -100,6 +100,9 @@ pub const Context = struct {
     workspace_count: usize = 0,
     active_workspace: ?usize = null,
 
+    /// Set to true when workspace/toplevel state changes — triggers bar redraw
+    bar_dirty: bool = false,
+
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator, self: *Context) !void {
@@ -264,10 +267,12 @@ fn foreignToplevelManagerListener(manager: *zwlr.ForeignToplevelManagerV1, event
             info.* = .{ .handle = ev.toplevel };
             ev.toplevel.setListener(*Context, toplevelHandleListener, ctx);
             ctx.toplevel_count += 1;
+            ctx.bar_dirty = true;
             std.log.info("foreign toplevel: new handle #{d}", .{ctx.toplevel_count - 1});
         },
         .finished => {
             ctx.foreign_toplevel = null;
+            ctx.bar_dirty = true;
         },
     }
 }
@@ -286,6 +291,7 @@ fn toplevelHandleListener(handle: *zwlr.ForeignToplevelHandleV1, event: zwlr.For
             @memcpy(info.title[0..len], src[0..len]);
             info.title[len] = 0;
             info.title_len = len;
+            ctx.bar_dirty = true;
             std.log.info("toplevel title: '{s}'", .{src});
         },
         .app_id => |ev| {
@@ -294,6 +300,7 @@ fn toplevelHandleListener(handle: *zwlr.ForeignToplevelHandleV1, event: zwlr.For
             @memcpy(info.app_id[0..len], src[0..len]);
             info.app_id[len] = 0;
             info.app_id_len = len;
+            ctx.bar_dirty = true;
             std.log.info("toplevel app_id: '{s}'", .{src});
         },
         .state => |ev| {
@@ -313,10 +320,12 @@ fn toplevelHandleListener(handle: *zwlr.ForeignToplevelHandleV1, event: zwlr.For
             } else if (ctx.active_toplevel == idx) {
                 ctx.active_toplevel = null;
             }
+            ctx.bar_dirty = true;
         },
         .done => {},
         .closed => {
             info.is_closed = true;
+            ctx.bar_dirty = true;
             // Remove this toplevel from the list
             if (ctx.active_toplevel == idx) ctx.active_toplevel = null;
             // Shift remaining entries
@@ -344,6 +353,7 @@ fn workspaceManagerListener(manager: *ext.WorkspaceManagerV1, event: ext.Workspa
             info.* = .{ .handle = ev.workspace };
             ev.workspace.setListener(*Context, workspaceHandleListener, ctx);
             ctx.workspace_count += 1;
+            ctx.bar_dirty = true;
             std.log.info("workspace: new handle #{d}", .{ctx.workspace_count - 1});
         },
         .workspace_group, .done, .finished => {},
@@ -363,6 +373,7 @@ fn workspaceHandleListener(handle: *ext.WorkspaceHandleV1, event: ext.WorkspaceH
             @memcpy(info.name[0..len], src[0..len]);
             info.name[len] = 0;
             info.name_len = len;
+            ctx.bar_dirty = true;
         },
         .state => |ev| {
             info.active = ev.state.active;
@@ -371,6 +382,7 @@ fn workspaceHandleListener(handle: *ext.WorkspaceHandleV1, event: ext.WorkspaceH
             } else if (ctx.active_workspace == idx) {
                 ctx.active_workspace = null;
             }
+            ctx.bar_dirty = true;
         },
         .id => |ev| {
             const src = std.mem.span(ev.id);
@@ -378,8 +390,25 @@ fn workspaceHandleListener(handle: *ext.WorkspaceHandleV1, event: ext.WorkspaceH
             @memcpy(info.ws_id[0..len], src[0..len]);
             info.ws_id[len] = 0;
             info.ws_id_len = len;
+            ctx.bar_dirty = true;
         },
-        .removed, .capabilities, .coordinates => {},
+        .removed => {
+            ctx.bar_dirty = true;
+            handle.destroy();
+            var j = idx;
+            while (j + 1 < ctx.workspace_count) : (j += 1) {
+                ctx.workspaces[j] = ctx.workspaces[j + 1];
+            }
+            ctx.workspace_count -= 1;
+            if (ctx.active_workspace) |aw| {
+                if (aw == idx) {
+                    ctx.active_workspace = null;
+                } else if (aw > idx) {
+                    ctx.active_workspace = aw - 1;
+                }
+            }
+        },
+        .capabilities, .coordinates => {},
     }
 }
 
