@@ -228,7 +228,9 @@ pub const Canvas = struct {
         }
     }
 
-    pub fn fillRoundedRectSmooth(self: *Canvas, x: i32, y: i32, w: i32, h: i32, radius: i32, color: Color) void {
+    pub fn fillRoundedRectMSAA(self: *Canvas, x: i32, y: i32, w: i32, h: i32, radius: i32, color: Color) void {
+        // 4× MSAA: 4 SDF samples per pixel at (¼,¼), (¾,¼), (¼,¾), (¾,¾) sub-pixel positions.
+        // Averaging these produces sub-pixel edge anti-aliasing matching end-4's OpacityMask quality.
         if (radius <= 0) {
             self.fillRect(x, y, w, h, color);
             return;
@@ -248,16 +250,25 @@ pub const Canvas = struct {
         const hf: f32 = @floatFromInt(h);
         const rf: f32 = @floatFromInt(r);
 
+        const half_w: f32 = 0.75;
+        const w_aa: f32 = 1.5;
+
         var row: i32 = y0;
         while (row < y1) : (row += 1) {
-            const py: f32 = @as(f32, @floatFromInt(row)) + 0.5;
+            const py0: f32 = @as(f32, @floatFromInt(row));
             var col: i32 = x0;
             while (col < x1) : (col += 1) {
-                const px: f32 = @as(f32, @floatFromInt(col)) + 0.5;
-                const dist = sdfRoundedRect(px, py, xf, yf, wf, hf, rf);
-                const half_w: f32 = 1.5;
-                const t = half_w - dist;
-                const coverage: u8 = if (t <= 0) 0 else if (t >= 3.0) 255 else @intFromFloat(t / 3.0 * 255.0);
+                const px0: f32 = @as(f32, @floatFromInt(col));
+                var total: u32 = 0;
+                var si: u32 = 0;
+                while (si < 4) : (si += 1) {
+                    const sx = px0 + @as(f32, @floatFromInt(si % 2)) * 0.5 + 0.25;
+                    const sy = py0 + @as(f32, @floatFromInt(si / 2)) * 0.5 + 0.25;
+                    const dist = sdfRoundedRect(sx, sy, xf, yf, wf, hf, rf);
+                    const t = half_w - dist;
+                    total += if (t <= 0) 0 else if (t >= w_aa) 255 else @intFromFloat(t / w_aa * 255.0);
+                }
+                const coverage: u8 = @intCast(total / 4);
                 if (coverage == 0) continue;
                 const c = if (coverage == 255) color else Color{
                     .r = color.r,

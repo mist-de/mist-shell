@@ -267,8 +267,8 @@ pub const MediaPopup = struct {
     }
 
     fn drawFull(canvas: *Canvas, self: *MediaPopup, mpris: *const mpris_mod.MprisPlayer, colLayer0: Color, colOnLayer0: Color, colOnLayer1: Color, colSubtext: Color, colPrimary: Color, colOnPrimary: Color, colSecondaryContainer: Color) void {
-        canvas.fill(Color.rgba(0xec, 0xe6, 0xe9, 0xFF));
-        canvas.fillRoundedRectAA(0, 0, POPUP_W, POPUP_H, 12, colLayer0);
+        canvas.fill(Color.transparent);
+        canvas.fillRoundedRectMSAA(0, 0, POPUP_W, POPUP_H, 12, colLayer0);
 
         const artR: i32 = 12;
         if (mpris.art_has) {
