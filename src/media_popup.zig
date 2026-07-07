@@ -31,7 +31,7 @@ const PROGRESS_Y: i32 = 74;
 const PROGRESS_H: i32 = 4;
 const BTN_Y: i32 = 104;
 
-// Buttons centered horizontally in the content area (end-4: prev+next on slider row, play/pause on time row)
+// Buttons centered horizontally in content area
 const COL_CENTER = COL_X + (COL_R - COL_X) / 2;
 const PREV_CX: i32 = COL_CENTER - 50;
 const PLAY_CX: i32 = COL_CENTER;
@@ -79,8 +79,7 @@ pub const MediaPopup = struct {
     needs_redraw: bool = false,
     needs_full_redraw: bool = true,
     wave_amplitude: f32 = 0, // smooth amplitude transition (0 = flat, PROGRESS_H*0.5 = full wave)
-    /// Left margin of the popup in output space (set by show(), used for coordinate conversion)
-    popup_left: i32 = 0,
+        popup_left: i32 = 0,
     output_idx: usize = 0,
 
     pub fn init(self: *MediaPopup, ctx: *Context, output_idx: usize, allocator: std.mem.Allocator) !void {
@@ -129,7 +128,7 @@ pub const MediaPopup = struct {
         const compositor = ctx.compositor orelse return;
         const layer_shell = ctx.layer_shell orelse return;
 
-        // Create fresh surface + layer (like end-4 Loader destroys/recreates PanelWindow)
+        // Create fresh surface + layer
         const surface = compositor.createSurface() catch return;
         const layer = layer_shell.getLayerSurface(
             surface,
@@ -144,7 +143,7 @@ pub const MediaPopup = struct {
         layer.setKeyboardInteractivity(.on_demand);
         layer.setListener(*MediaPopup, popupLayerSurfaceListener, self);
 
-        // Position so art thumbnail center aligns with media widget ring center (media_area_x0 + 18)
+        // Align art thumbnail center with media ring center
         const output_w = if (ctx.output_count > 0) ctx.outputs[0].mode_w else 1366;
         const ring_cx = ctx.media_area_x0 + 18;
         const art_cx_in_popup = MARGIN + ART_SIZE / 2;
@@ -156,20 +155,17 @@ pub const MediaPopup = struct {
         self.popup_left = popup_left;
         layer.setMargin(POPUP_MARGIN_TOP, 0, 0, popup_left);
 
-        // Must wait for first configure before attaching a buffer (protocol requirement)
+        // Wait for first configure before attaching buffer
         self.surface = surface;
         self.layer_surface = layer;
         self.show_pending = true;
 
-        // First commit (no buffer) — triggers compositor to send configure
+        // First commit (no buffer) triggers configure
         surface.commit();
         ctx.flush();
 
-        // Wait for configure event
         ctx.roundtrip();
-        // configure listener fired → show_pending = false
-
-        // Now safe to attach buffer: draw full content
+        // Now safe to attach buffer
         self.visible = true;
         ctx.popup_surface = surface;
         self.markDirty();
@@ -180,7 +176,7 @@ pub const MediaPopup = struct {
             self.show_pending = saved;
         }
 
-        // Attach buffer and commit (surface appears with full content, no flash)
+        // Attach and commit
         surface.damageBuffer(0, 0, POPUP_W, POPUP_H);
         surface.commit();
         ctx.flush();
@@ -191,7 +187,7 @@ pub const MediaPopup = struct {
         self.visible = false;
         ctx.popup_surface = null;
 
-        // Destroy surface + layer (compositor sends leave events, next show is fresh)
+        // Destroy surface + layer
         if (self.layer_surface) |ls| {
             ls.destroy();
         }
@@ -212,7 +208,7 @@ pub const MediaPopup = struct {
     }
 
     fn drawProgress(canvas: *Canvas, self: *MediaPopup, mpris: *const mpris_mod.MprisPlayer, colLayer0: Color, colPrimary: Color, colSecondaryContainer: Color, colSubtext: Color) void {
-        // Clear progress bar area + wave overshoot, then redraw waves
+        // Clear and redraw wave progress
         const PROGRESS_X: i32 = COL_X;
         const PROGRESS_W: i32 = POPUP_W - COL_X - MARGIN;
         const max_amplitude: f32 = @as(f32, @floatFromInt(PROGRESS_H)) * 0.5;
@@ -250,7 +246,7 @@ pub const MediaPopup = struct {
             canvas.fillSineWave(PROGRESS_X, PROGRESS_Y, fillW, PROGRESS_H, self.wave_amplitude, freq, phase, colPrimary);
         }
 
-        // Clear time text area above baseline (text renders above baseline, not below)
+        // Clear time text area
         var posBuf: [16]u8 = undefined;
         var lenBuf: [16]u8 = undefined;
         const posStr = formatTime(mpris.position, &posBuf);

@@ -8,13 +8,13 @@ pub fn build(b: *std.Build) void {
     const wayland_xml_path = blk: {
         var code: u8 = undefined;
         const raw = b.runAllowFail(&.{ "sh", "-c", "echo -n $WAYLAND_XML" }, &code, .ignore) catch
-            @panic("WAYLAND_XML not set. Run inside nix-shell.");
+            @panic("WAYLAND_XML not set. See README.md for setup.");
         break :blk std.mem.trimEnd(u8, raw, &[_]u8{ '\n', '\r' });
     };
     const wayland_protocols_path = blk: {
         var code: u8 = undefined;
         const raw = b.runAllowFail(&.{ "sh", "-c", "echo -n $WAYLAND_PROTOCOLS" }, &code, .ignore) catch
-            @panic("WAYLAND_PROTOCOLS not set. Run inside nix-shell.");
+            @panic("WAYLAND_PROTOCOLS not set. See README.md for setup.");
         break :blk std.mem.trimEnd(u8, raw, &[_]u8{ '\n', '\r' });
     };
 
@@ -27,6 +27,8 @@ pub fn build(b: *std.Build) void {
 
     scanner.addCustomProtocol(b.path("protocols/wlr-layer-shell-unstable-v1.xml"));
     scanner.addCustomProtocol(b.path("protocols/wlr-foreign-toplevel-management-unstable-v1.xml"));
+    scanner.addCustomProtocol(b.path("protocols/river-control-unstable-v1.xml"));
+    scanner.addCustomProtocol(b.path("protocols/dwl-ipc-unstable-v2.xml"));
     scanner.addSystemProtocol("staging/cursor-shape/cursor-shape-v1.xml");
     scanner.addSystemProtocol("staging/ext-workspace/ext-workspace-v1.xml");
     scanner.addSystemProtocol("stable/xdg-shell/xdg-shell.xml");
@@ -42,6 +44,8 @@ pub fn build(b: *std.Build) void {
     scanner.generate("wp_cursor_shape_manager_v1", 1);
     scanner.generate("xdg_wm_base", 6);
     scanner.generate("zwp_tablet_manager_v2", 2);
+    scanner.generate("zriver_control_v1", 1);
+    scanner.generate("zdwl_ipc_manager_v2", 1);
 
     const exe = b.addExecutable(.{
         .name = "mist-bar",

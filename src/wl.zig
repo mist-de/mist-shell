@@ -4,6 +4,8 @@ const wl = wayland.client.wl;
 const zwlr = wayland.client.zwlr;
 const wp = wayland.client.wp;
 const ext = wayland.client.ext;
+const zriver = wayland.client.zriver;
+const zdwl = wayland.client.zdwl;
 
 const ResourceState = @import("config.zig").ResourceState;
 const mpris_mod = @import("mpris.zig");
@@ -58,6 +60,9 @@ pub const Context = struct {
     seat: ?*wl.Seat = null,
     pointer: ?*wl.Pointer = null,
     keyboard: ?*wl.Keyboard = null,
+    river_control: ?*zriver.ControlV1 = null,
+    dwl_ipc_manager: ?*zdwl.IpcManagerV2 = null,
+    dwl_ipc_output: ?*zdwl.IpcOutputV2 = null,
 
     outputs: [max_outputs]OutputInfo = undefined,
     output_count: usize = 0,
@@ -65,12 +70,9 @@ pub const Context = struct {
 
     last_enter_serial: u32 = 0,
     last_enter_surface: ?*wl.Surface = null,
-    /// Tracks the actual surface the pointer was last over (via enter event).
-    /// Not overridden by show() — used to detect stale coordinates.
     pointer_surface: ?*wl.Surface = null,
     pointer_x: i32 = 0,
     pointer_y: i32 = 0,
-    /// Set to the popup's wl_surface when media controls popup is visible
     popup_surface: ?*wl.Surface = null,
 
     toplevels: [max_toplevels]ToplevelInfo = undefined,
@@ -81,17 +83,17 @@ pub const Context = struct {
     workspace_count: usize = 0,
     active_workspace: ?usize = null,
 
-    /// Set to true when workspace/toplevel state changes — triggers bar redraw
     bar_dirty: bool = false,
     resources: ResourceState = .{},
 
+    now_ms: i64 = 0,
 
-    /// Media controls popup (toggled by left-click on media widget)
+    scroll_accum: i32 = 0,
+    dwl_ipc_active_tag: ?u32 = null,
+
     media_popup: MediaPopup = .{},
 
-    /// MPRIS player reference for click dispatch
     mpris: ?*mpris_mod.MprisPlayer = null,
-    /// Clickable area of the media widget (set during draw, consumed by handleClick)
     media_area_x0: i32 = 0,
     media_area_x1: i32 = 0,
 
@@ -108,18 +110,27 @@ pub const Context = struct {
         self.registry.setListener(*Context, registryListener, self);
         self.roundtrip();
 
-        // Set up foreign toplevel manager listener
         if (self.foreign_toplevel) |ftm| {
             ftm.setListener(*Context, foreignToplevelManagerListener, self);
         }
 
-        // Set up workspace manager listener
         if (self.workspace_manager) |wsm| {
             wsm.setListener(*Context, workspaceManagerListener, self);
         }
-        // NOTE: second roundtrip removed — must be done by caller AFTER
-        // setting seat listener to avoid losing the initial seat events
-        // (name, capabilities). See main.zig.
+
+        if (self.dwl_ipc_manager) |mgr| {
+            if (self.output_count > 0) {
+                self.dwl_ipc_output = mgr.getOutput(self.outputs[0].output) catch null;
+                if (self.dwl_ipc_output) |dwl_out| {
+                    std.log.info("  -> dwl_ipc_output bound", .{});
+                    dwl_out.setListener(*Context, dwlIpcOutputListener, self);
+                }
+            }
+            mgr.release();
+            self.dwl_ipc_manager = null;
+        }
+
+        // Second roundtrip done by caller after seat listener is set (see main.zig)
     }
 
     pub fn deinit(self: *Context) void {
@@ -163,6 +174,16 @@ fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, ctx: *Cont
                 ctx.foreign_toplevel = registry.bind(global.name, zwlr.ForeignToplevelManagerV1, global.version) catch null;
             } else if (std.mem.eql(u8, iface, std.mem.span(ext.WorkspaceManagerV1.interface.name))) {
                 ctx.workspace_manager = registry.bind(global.name, ext.WorkspaceManagerV1, global.version) catch null;
+            } else if (std.mem.eql(u8, iface, std.mem.span(zriver.ControlV1.interface.name))) {
+                ctx.river_control = registry.bind(global.name, zriver.ControlV1, 1) catch null;
+                std.log.info("  -> river_control={any}", .{ctx.river_control});
+            } else if (std.mem.eql(u8, iface, std.mem.span(zdwl.IpcManagerV2.interface.name))) {
+                ctx.dwl_ipc_manager = registry.bind(global.name, zdwl.IpcManagerV2, 1) catch null;
+                if (ctx.dwl_ipc_manager != null) {
+                    std.log.info("  -> dwl_ipc_manager bound", .{});
+                } else {
+                    std.log.warn("  -> dwl_ipc_manager bind FAILED", .{});
+                }
             } else if (std.mem.eql(u8, iface, std.mem.span(wl.Seat.interface.name))) {
                 ctx.seat = registry.bind(global.name, wl.Seat, @min(global.version, 8)) catch null;
                 std.log.info("  -> seat={any}", .{ctx.seat});
@@ -245,7 +266,6 @@ fn foreignToplevelManagerListener(manager: *zwlr.ForeignToplevelManagerV1, event
 }
 
 fn toplevelHandleListener(handle: *zwlr.ForeignToplevelHandleV1, event: zwlr.ForeignToplevelHandleV1.Event, ctx: *Context) void {
-    // Find the toplevel info for this handle
     const idx = for (0..ctx.toplevel_count) |i| {
         if (ctx.toplevels[i].handle == handle) break i;
     } else return;
@@ -269,8 +289,7 @@ fn toplevelHandleListener(handle: *zwlr.ForeignToplevelHandleV1, event: zwlr.For
             std.log.info("toplevel app_id: '{s}'", .{src});
         },
         .state => |ev| {
-            // ev.state is a wl_array of u32 state values
-            // State values: 0=maximized, 1=minimized, 2=fullscreen, 3=active
+            // State: 0=maximized, 1=minimized, 2=fullscreen, 3=active
             var is_active = false;
             const states = ev.state.data orelse return;
             const state_bytes = @as([*]const u8, @ptrCast(states))[0..ev.state.size];
@@ -289,21 +308,42 @@ fn toplevelHandleListener(handle: *zwlr.ForeignToplevelHandleV1, event: zwlr.For
         .done => {},
         .closed => {
             ctx.bar_dirty = true;
-            // Remove this toplevel from the list
             if (ctx.active_toplevel == idx) ctx.active_toplevel = null;
-            // Shift remaining entries
             var j = idx;
             while (j + 1 < ctx.toplevel_count) : (j += 1) {
                 ctx.toplevels[j] = ctx.toplevels[j + 1];
             }
             ctx.toplevel_count -= 1;
-            // Update active_toplevel index if needed
             if (ctx.active_toplevel) |at| {
                 if (at > idx) ctx.active_toplevel = at - 1;
             }
             handle.destroy();
         },
         .output_enter, .output_leave, .parent => {},
+    }
+}
+
+/// Listen to dwl-ipc output tag events to track the active tag.
+/// Tag events arrive in a batch; active_workspace is committed on the frame event.
+fn dwlIpcOutputListener(_: *zdwl.IpcOutputV2, event: zdwl.IpcOutputV2.Event, ctx: *Context) void {
+    switch (event) {
+        .tag => |ev| {
+            // TagState is bitmask: bit 0 = active, bit 1 = urgent
+            const state_val: c_int = @intFromEnum(ev.state);
+            if (state_val & 1 != 0) {
+                ctx.dwl_ipc_active_tag = ev.tag;
+            }
+        },
+        .frame => {
+            if (ctx.dwl_ipc_active_tag) |tag| {
+                if (tag < ctx.workspace_count) {
+                    ctx.active_workspace = tag;
+                }
+                ctx.bar_dirty = true;
+            }
+            ctx.dwl_ipc_active_tag = null;
+        },
+        else => {},
     }
 }
 

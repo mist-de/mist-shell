@@ -2,9 +2,7 @@ const std = @import("std");
 const cc = @import("c.zig").c;
 const Color = @import("config.zig").Color;
 
-// ═══════════════════════════════════════════════════════════
-// Canvas — pixel drawing primitives
-// ═══════════════════════════════════════════════════════════
+// Canvas: pixel drawing primitives
 
 pub const Canvas = struct {
     data: []align(std.heap.page_size_min) u8,
@@ -229,8 +227,7 @@ pub const Canvas = struct {
     }
 
     pub fn fillRoundedRectMSAA(self: *Canvas, x: i32, y: i32, w: i32, h: i32, radius: i32, color: Color) void {
-        // 4× MSAA: 4 SDF samples per pixel at (¼,¼), (¾,¼), (¼,¾), (¾,¾) sub-pixel positions.
-        // Averaging these produces sub-pixel edge anti-aliasing matching end-4's OpacityMask quality.
+        // 4x MSAA SDF sampling
         if (radius <= 0) {
             self.fillRect(x, y, w, h, color);
             return;
@@ -328,10 +325,7 @@ pub const Canvas = struct {
     }
 
     pub fn fillSineWave(self: *Canvas, x: i32, y: i32, w: i32, h: i32, amplitude: f32, frequency: f32, phase: f32, color: Color) void {
-        // Sine-wave tube: draws a thick sine wave as a filled shape (like end-4 WavyLine with lineWidth = h)
-        // Each column at px has center_y = y + h/2 + amplitude*sin(phase + px*frequency)
-        // Pixel is inside if |py - center_y| < h/2
-        // Extended vertically by amplitude + h/2 to let the wave oscillation be visible (like end-4's 6x-height Canvas)
+        // Thick sine wave filled shape (center_y + amplitude*sin(phase + px*frequency), ±h/2)
         if (color.a == 0 or w <= 0 or h <= 0) return;
         const amp_ceil = @as(i32, @intFromFloat(@ceil(amplitude)));
         const x0 = @max(0, x);
@@ -516,9 +510,7 @@ pub const Canvas = struct {
     }
 };
 
-// ═══════════════════════════════════════════════════════════
 // Glyph cache entry
-// ═══════════════════════════════════════════════════════════
 
 pub const Glyph = struct {
     width: u32,
@@ -534,9 +526,7 @@ pub const Glyph = struct {
     }
 };
 
-// ═══════════════════════════════════════════════════════════
-// Font (FreeType + HarfBuzz)
-// ═══════════════════════════════════════════════════════════
+// Font: FreeType + HarfBuzz
 
 pub const Font = struct {
     allocator: std.mem.Allocator,
@@ -636,9 +626,7 @@ pub const Font = struct {
     }
 };
 
-// ═══════════════════════════════════════════════════════════
-// Text shaping + rendering (HarfBuzz)
-// ═══════════════════════════════════════════════════════════
+// Text shaping + rendering
 
 fn shape(font: *Font, text: []const u8, count: *c_uint) struct { [*c]cc.hb_glyph_info_t, [*c]cc.hb_glyph_position_t } {
     cc.hb_buffer_reset(font.hb_buf);
@@ -652,7 +640,7 @@ fn shape(font: *Font, text: []const u8, count: *c_uint) struct { [*c]cc.hb_glyph
     return .{ info, pos };
 }
 
-/// Returns true if any shaped glyph is .notdef (glyph index 0).
+// Returns true if any glyph is .notdef
 fn hasNotdef(info: [*c]cc.hb_glyph_info_t, count: c_uint) bool {
     var i: c_uint = 0;
     while (i < count) : (i += 1) {
@@ -661,7 +649,7 @@ fn hasNotdef(info: [*c]cc.hb_glyph_info_t, count: c_uint) bool {
     return false;
 }
 
-/// Shape and render text, with automatic .notdef fallback detection.
+// Shape and render with .notdef fallback
 fn renderShaped(canvas: *Canvas, use_font: *Font, use_info: [*c]cc.hb_glyph_info_t, use_pos: [*c]cc.hb_glyph_position_t, count: c_uint, x: i32, y: i32, color: Color) void {
     var pen_x_26_6: i32 = x << 6;
     const baseline_y: i32 = y;

@@ -11,6 +11,8 @@ A minimal Wayland desktop environment shell written in Zig — inspired by [end-
 - Zero GLib dependencies — no GTK/GNOME baggage
 - FreeType + HarfBuzz for text via @cImport
 - MPRIS media detection via basu
+- Album art via ImageMagick (convert)
+- Audio control via WirePlumber (wpctl)
 
 ## Quick Start
 
@@ -26,30 +28,30 @@ zig build -Doptimize=ReleaseFast -- -lwayland-client -lxkbcommon -lfreetype -lha
 **Debian / Ubuntu:**
 ```sh
 sudo apt install libwayland-dev wayland-protocols libxkbcommon-dev \
-  libfreetype-dev libharfbuzz-dev libbasu-dev zig
+  libfreetype-dev libharfbuzz-dev libbasu-dev imagemagick wireplumber zig
 ```
 
 **Fedora:**
 ```sh
 sudo dnf install wayland-devel wayland-protocols-devel libxkbcommon-devel \
-  freetype-devel harfbuzz-devel basu-devel zig
+  freetype-devel harfbuzz-devel basu-devel imagemagick wireplumber zig
 ```
 
 **Arch Linux:**
 ```sh
-sudo pacman -S wayland wayland-protocols libxkbcommon freetype2 harfbuzz basu zig
+sudo pacman -S wayland wayland-protocols libxkbcommon freetype2 harfbuzz basu imagemagick wireplumber zig
 ```
 
 **Void Linux:**
 ```sh
 sudo xbps-install -S wayland-devel wayland-protocols libxkbcommon-devel \
-  freetype-devel harfbuzz-devel basu-devel zig
+  freetype-devel harfbuzz-devel basu-devel imagemagick wireplumber zig
 ```
 
 **openSUSE:**
 ```sh
 sudo zypper install wayland-devel wayland-protocols-devel libxkbcommon-devel \
-  freetype2-devel harfbuzz-devel basu-devel zig
+  freetype2-devel harfbuzz-devel basu-devel imagemagick wireplumber zig
 ```
 
 **NixOS:**
@@ -89,11 +91,13 @@ Requires `wlr-layer-shell`, `ext-workspace-v1`, and `zwlr-foreign-toplevel-manag
 | M3 color palette | Working |
 | Workspace indicators | Working (live via ext-workspace) |
 | Active window tracking | Working (live via zwlr-foreign-toplevel) |
-| Mouse input (click workspace/activate) | Working |
+| Mouse input (click workspace/scroll) | Working |
 | Resource rings | Working (live /proc) |
 | MPRIS media detection | Working (D-Bus via basu) |
+| Media controls popup (album art, prev/play/next) | Working |
+| Album art (file:// via ImageMagick, HTTPS via curl) | Working |
+| Audio volume indicator (capsule + scroll) | Working |
 | Auto-hide | Not implemented |
-| Popups / tooltips | Not implemented |
 | Config file parsing | Not implemented |
 
 ## License

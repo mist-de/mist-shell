@@ -1,8 +1,12 @@
 const std = @import("std");
 
-// ═══════════════════════════════════════════════════════════
+fn nowMs() i64 {
+    var ts: std.os.linux.timespec = undefined;
+    _ = std.os.linux.clock_gettime(std.os.linux.CLOCK.MONOTONIC, &ts);
+    return @as(i64, @intCast(ts.sec)) * 1000 + @divTrunc(@as(i64, @intCast(ts.nsec)), 1_000_000);
+}
+
 // Geometry types
-// ═══════════════════════════════════════════════════════════
 
 pub const Size = u32;
 
@@ -14,9 +18,7 @@ pub const Rect = struct {
     pub const zero: Rect = .{ .x = 0, .y = 0, .width = 0, .height = 0 };
 };
 
-// ═══════════════════════════════════════════════════════════
 // Color
-// ═══════════════════════════════════════════════════════════
 
 pub const Color = extern struct {
     r: u8,
@@ -57,9 +59,7 @@ pub const Color = extern struct {
     }
 };
 
-// ═══════════════════════════════════════════════════════════
-// Appearance constants (from end-4 Appearance.qml)
-// ═══════════════════════════════════════════════════════════
+// Appearance constants
 
 pub const Appearance = struct {
     pub const bar_height: i32 = 40;
@@ -96,7 +96,7 @@ pub const Appearance = struct {
     pub const font_large: i32 = 17;
     pub const font_larger: i32 = 19;
 
-    // M3 color palette (exact from end-4 Appearance.qml)
+    // M3 color palette
     pub const m3background = Color.rgba(0x14, 0x13, 0x13, 0xFF);
     pub const m3on_background = Color.rgba(0xe6, 0xe1, 0xe1, 0xFF);
     pub const m3surface_container_low = Color.rgba(0x1c, 0x1b, 0x1c, 0xFF);
@@ -122,9 +122,7 @@ pub const Appearance = struct {
     pub const col_subtext = m3outline;
 };
 
-// ═══════════════════════════════════════════════════════════
 // Configuration
-// ═══════════════════════════════════════════════════════════
 
 pub const Config = struct {
     height: u32 = 40,
@@ -213,20 +211,18 @@ pub fn resolveFontPath(allocator: std.mem.Allocator, name: []const u8) ![]u8 {
 
 pub fn resolveFallbackFont(allocator: std.mem.Allocator) ?[]u8 {
     const cfg = get();
-    // Try exact config filename first
     if (resolveFontPath(allocator, cfg.font_fallback)) |p| return p else |_| {}
-    // Try alternative common names
     for (&[_][]const u8{ "NotoSansBengali.ttf", "NotoSansBengali-Regular.ttf", "Mukti-Book.ttf" }) |alt| {
         if (resolveFontPath(allocator, alt)) |p| return p else |_| {}
     }
-    // Use fontconfig to find any Bengali font by family name
+    // fontconfig fallback by family
     for (&[_][]const u8{ "Noto Sans Bengali", "Noto Sans Bengali Regular", "Mukti" }) |fam| {
         if (findFontByFamily(allocator, fam)) |p| return p;
     }
     return null;
 }
 
-/// Returns Nerd Font codepoint for the detected distro from /etc/os-release
+    // Distro icon from /etc/os-release
 pub fn detectDistroIcon() u21 {
     const fd = std.c.open("/etc/os-release", .{}, @as(c_uint, 0));
     if (fd == -1) return 0xF313;
@@ -242,7 +238,7 @@ pub fn detectDistroIcon() u21 {
         const line = std.mem.trim(u8, raw, &[_]u8{ ' ', '\r' });
         if (!std.mem.startsWith(u8, line, "ID=")) continue;
 
-        // Handle both ID=nixos and ID="nixos"
+        // Handle ID=nixos or ID="nixos"
         var id = line[3..];
         if (id.len > 0 and id[0] == '"') {
             if (id.len < 2) continue;
@@ -269,9 +265,7 @@ pub fn detectDistroIcon() u21 {
     return 0xF313; // nixos fallback
 }
 
-// ═══════════════════════════════════════════════════════════
-// System resource reading (RAM, CPU, temp from /proc)
-// ═══════════════════════════════════════════════════════════
+// System resources: RAM, CPU, temp, battery
 
 pub const ResourceState = struct {
     memory_used_pct: f32 = 0,
@@ -285,12 +279,22 @@ pub const ResourceState = struct {
     cpu_temp: f32 = 0,
     cpu_prev: [10]u64 = .{0} ** 10,
     cpu_initialized: bool = false,
+    audio_volume: f32 = 0.75,
+    audio_muted: bool = false,
+    mic_volume: f32 = 0.75,
+    mic_muted: bool = false,
+    last_vol_change_ms: i64 = 0,
+    last_mic_change_ms: i64 = 0,
+    battery_pct: i8 = -1,
+    battery_charging: bool = false,
 };
 
 pub fn updateResources(state: *ResourceState) void {
     readMemInfo(state);
     readCpuStat(state);
     readTemp(state);
+    readBattery(state);
+    // Audio tracked locally, NOT re-read (preserves user changes)
 }
 
 fn readMemInfo(state: *ResourceState) void {
@@ -418,4 +422,115 @@ fn readTemp(state: *ResourceState) void {
         } else break;
     }
     state.cpu_temp = @as(f32, @floatFromInt(num)) / 1000.0;
+}
+
+fn readFileFirstLine(path: []const u8, buf: []u8) ?[]u8 {
+    // open() requires null-terminated string
+    var path_buf: [256:0]u8 = undefined;
+    if (path.len >= path_buf.len) return null;
+    @memcpy(path_buf[0..path.len], path);
+    path_buf[path.len] = 0;
+    const fd = std.c.open(&path_buf, .{}, @as(c_uint, 0));
+    if (fd == -1) return null;
+    defer _ = std.c.close(fd);
+    const n = std.c.read(fd, buf.ptr, buf.len);
+    if (n <= 0) return null;
+    // Trim trailing newline/whitespace
+    var end: usize = @intCast(n);
+    while (end > 0 and (buf[end - 1] == '\n' or buf[end - 1] == '\r' or buf[end - 1] == ' ')) {
+        end -= 1;
+    }
+    return buf[0..end];
+}
+
+fn readBattery(state: *ResourceState) void {
+    const bat_names = [_][]const u8{ "BAT0", "BAT1", "BAT2", "BAT3" };
+    var buf: [64]u8 = undefined;
+
+    for (bat_names) |bat| {
+        var cap_path: [128]u8 = undefined;
+        const cap_path_s = std.fmt.bufPrint(cap_path[0..], "/sys/class/power_supply/{s}/capacity", .{bat}) catch return;
+        const cap_str = readFileFirstLine(cap_path_s, buf[0..]) orelse continue;
+        const pct = std.fmt.parseInt(i8, cap_str, 10) catch continue;
+        state.battery_pct = @min(100, @max(0, pct));
+
+        // Charging status
+        var stat_path: [128]u8 = undefined;
+        const stat_path_s = std.fmt.bufPrint(stat_path[0..], "/sys/class/power_supply/{s}/status", .{bat}) catch return;
+        const status_str = readFileFirstLine(stat_path_s, buf[0..]) orelse "";
+        state.battery_charging = std.mem.eql(u8, status_str, "Charging") or std.mem.eql(u8, status_str, "Full");
+
+        return; // found a battery
+    }
+    // No battery found (desktop)
+    state.battery_pct = -1;
+    state.battery_charging = false;
+}
+
+pub fn readAudioState(state: *ResourceState) void {
+    const c2 = @import("c.zig").c;
+    // Sink volume/mute
+    const sink_fp = c2.popen("wpctl get-volume @DEFAULT_SINK@ 2>/dev/null", "r");
+    if (sink_fp) |fp| {
+        defer _ = c2.pclose(fp);
+        var buf: [128]u8 = undefined;
+        if (c2.fgets(&buf, @intCast(buf.len), fp)) |line| {
+            const s = std.mem.sliceTo(line[0..buf.len], 0);
+            if (std.mem.indexOfScalar(u8, s, ':')) |colon| {
+                const val_str = std.mem.trim(u8, s[colon + 1 ..], " \t");
+                state.audio_volume = std.fmt.parseFloat(f32, val_str) catch 0.75;
+                state.audio_muted = std.mem.indexOf(u8, s, "MUTED") != null;
+            }
+        }
+    }
+    // Source (mic) volume/mute
+    const src_fp = c2.popen("wpctl get-volume @DEFAULT_SOURCE@ 2>/dev/null", "r");
+    if (src_fp) |fp| {
+        defer _ = c2.pclose(fp);
+        var buf: [128]u8 = undefined;
+        if (c2.fgets(&buf, @intCast(buf.len), fp)) |line| {
+            const s = std.mem.sliceTo(line[0..buf.len], 0);
+            if (std.mem.indexOfScalar(u8, s, ':')) |colon| {
+                const val_str = std.mem.trim(u8, s[colon + 1 ..], " \t");
+                state.mic_volume = std.fmt.parseFloat(f32, val_str) catch 0.75;
+            }
+            state.mic_muted = std.mem.indexOf(u8, s, "MUTED") != null;
+        }
+    }
+}
+
+pub fn toggleAudioMute(state: *ResourceState) void {
+    const c = @import("c.zig").c;
+    _ = c.system("wpctl set-mute @DEFAULT_SINK@ toggle");
+    state.audio_muted = !state.audio_muted;
+    state.last_vol_change_ms = nowMs();
+}
+
+pub fn toggleMicMute(state: *ResourceState) void {
+    const c = @import("c.zig").c;
+    _ = c.system("wpctl set-mute @DEFAULT_SOURCE@ toggle");
+    state.mic_muted = !state.mic_muted;
+    state.last_mic_change_ms = nowMs();
+}
+
+pub fn setVolume(state: *ResourceState, vol: f32) void {
+    const c = @import("c.zig").c;
+    const clamped = @min(2.0, @max(0.0, vol));
+    var cmd_buf: [64]u8 = undefined;
+    const cmd = std.fmt.bufPrint(cmd_buf[0..], "wpctl set-volume @DEFAULT_SINK@ {d:.2}", .{clamped}) catch return;
+    cmd_buf[cmd.len] = 0;
+    _ = c.system(&cmd_buf);
+    state.audio_volume = clamped;
+    state.last_vol_change_ms = nowMs();
+}
+
+pub fn setMicVolume(state: *ResourceState, vol: f32) void {
+    const c = @import("c.zig").c;
+    const clamped = @min(2.0, @max(0.0, vol));
+    var cmd_buf: [64]u8 = undefined;
+    const cmd = std.fmt.bufPrint(cmd_buf[0..], "wpctl set-volume @DEFAULT_SOURCE@ {d:.2}", .{clamped}) catch return;
+    cmd_buf[cmd.len] = 0;
+    _ = c.system(&cmd_buf);
+    state.mic_volume = clamped;
+    state.last_mic_change_ms = nowMs();
 }

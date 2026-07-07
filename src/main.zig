@@ -19,12 +19,11 @@ pub fn main() !void {
         s.setListener(*Context, bar_mod.seatListener, &ctx);
     }
 
-    // Roundtrip to get seat capabilities + initial toplevel/workspace state
-    // Must happen AFTER seat listener is set (see wl.zig init note)
+    // Roundtrip after seat listener (see wl.zig init)
     ctx.roundtrip();
     std.log.info("outputs: {d}", .{ctx.output_count});
 
-    // MPRIS media player (D-Bus via basu)
+    // MPRIS via basu D-Bus
     var mpris = mpris_mod.MprisPlayer.init() catch |err| blk: {
         std.log.warn("mpris init: {s}", .{@errorName(err)});
         break :blk mpris_mod.MprisPlayer{};
@@ -41,7 +40,10 @@ pub fn main() !void {
     ctx.roundtrip();
     bar_mod.drawOutputs(&ctx, &mpris);
 
-    // Initialize media controls popup (hidden off-screen until shown)
+    // Initial audio (tracked locally after this)
+    config_mod.readAudioState(&ctx.resources);
+
+    // Media controls popup
     ctx.media_popup.init(&ctx, 0, allocator) catch |err| {
         std.log.warn("media popup init: {s}", .{@errorName(err)});
     };
@@ -79,32 +81,33 @@ pub fn main() !void {
             mpris.process();
         }
 
-        // Time-based MPRIS re-query (every 200ms)
+        // MPRIS re-query every 200ms
         var ts: std.os.linux.timespec = undefined;
         _ = std.os.linux.clock_gettime(std.os.linux.CLOCK.MONOTONIC, &ts);
         const now_ms = @as(i64, @intCast(ts.sec)) * 1000 + @divTrunc(@as(i64, @intCast(ts.nsec)), 1_000_000);
+        ctx.now_ms = now_ms;
         if (now_ms - last_mpris_query_ms >= 200) {
             last_mpris_query_ms = now_ms;
             mpris.query();
         }
 
-        // Check async art loading (non-blocking, each iteration)
+        // Async art loading
         mpris.tickArtLoading();
 
-        // Time-based resource update (every 3s)
+        // Resources update every 3s
         if (now_ms - last_resource_ms >= 3000) {
             last_resource_ms = now_ms;
             config_mod.updateResources(&ctx.resources);
             ctx.bar_dirty = true;
         }
 
-        // Redraw when workspace/toplevel state changed
+        // Redraw on state changes
         if (mpris.changed) {
             ctx.bar_dirty = true;
             ctx.media_popup.markDirty();
             mpris.changed = false;
         }
-        // Redraw when async art load completes
+        // Redraw on art load
         if (mpris.art_loaded_changed) {
             mpris.art_loaded_changed = false;
             ctx.media_popup.markDirty();
@@ -115,7 +118,7 @@ pub fn main() !void {
         }
         bar_mod.drawOutputs(&ctx, &mpris);
 
-        // Advance position ONLY on poll timeout (matches real-time)
+        // Position advance on poll timeout
         if (timed_out) {
             if (mpris.has_player and mpris.status == .playing) {
                 mpris.position += 100000; // 100ms in μs
@@ -126,7 +129,7 @@ pub fn main() !void {
             }
         }
 
-        // Draw media controls popup (only when something actually changed)
+        // Draw popup when needed
         if (ctx.media_popup.visible and ctx.media_popup.needs_redraw) {
             ctx.media_popup.draw(&ctx);
             ctx.media_popup.commit(&ctx);

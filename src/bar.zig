@@ -17,9 +17,7 @@ const media_popup_mod = @import("media_popup.zig");
 const Rect = config_mod.Rect;
 const Appearance = config_mod.Appearance;
 
-// ═══════════════════════════════════════════════════════════
-// OutputState — per-output bar lifecycle
-// ═══════════════════════════════════════════════════════════
+// OutputState: per-output bar lifecycle
 
 pub const OutputState = struct {
     bar: ?Bar = null,
@@ -98,9 +96,7 @@ pub fn markAllDirty(ctx: *Context) void {
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-// Bar — widget drawing and layout
-// ═══════════════════════════════════════════════════════════
+// Bar: widget drawing and layout
 
 pub const Bar = struct {
     pub fn layerSurfaceListener(ls: *zwlr.LayerSurfaceV1, event: zwlr.LayerSurfaceV1.Event, bar: *Bar) void {
@@ -198,7 +194,7 @@ pub const Bar = struct {
 
         canvas.fill(Color.transparent);
 
-        // ═══ M3 Dark Mode Colors (exact from end-4 Appearance.qml) ═══
+        // Colors: M3 dark theme
         const colLayer0 = Color.rgba(0x14, 0x13, 0x13, 0xFF);
         const colLayer1 = Color.rgba(0x1c, 0x1b, 0x1c, 0xFF);
         const colOnLayer0 = Color.rgba(0xe6, 0xe1, 0xe1, 0xFF);
@@ -206,12 +202,13 @@ pub const Bar = struct {
         const colOnLayer1Inactive = Color.rgba(0x7d, 0x78, 0x7c, 0xFF);
         const colPrimary = Color.rgba(0xcb, 0xc4, 0xcb, 0xFF);
         const colOnPrimary = Color.rgba(0x32, 0x2f, 0x34, 0xFF);
-        const colSecondaryContainer = Color.rgba(0x4d, 0x4b, 0x4d, 0x99); // end-4: transparentize(0.4) = 60% opaque
+        const colSecondaryContainer = Color.rgba(0x4d, 0x4b, 0x4d, 0x99);
         const colOnSecondaryContainer = Color.rgba(0xec, 0xe6, 0xe9, 0xFF);
         const colOutline = Color.rgba(0x94, 0x8f, 0x94, 0xFF);
         const colSubtext = colOutline;
+        const colVolHigh = Color.rgba(0xf2, 0x6a, 0x6a, 0xFF);
 
-        // ═══ Layout Constants (end-4 Appearance.qml) ═══
+        // Layout constants
         const screenRounding: i32 = 23;
         const smallRounding: i32 = 12;
         const fullRounding: i32 = 9999;
@@ -237,7 +234,7 @@ pub const Bar = struct {
         const mcX: i32 = lcX + centerSideModuleWidth + centerSpacing;
         const rcX: i32 = mcX + wsBarGroupW + centerSpacing;
 
-        // ═══ WORKSPACE STATE ═══
+        // Workspace state
         var occupiedBuf: [16]bool = .{false} ** 16;
         var activeWs: usize = 0;
         const wsDisplayCount = @min(wsCount, ctx.workspace_count);
@@ -254,7 +251,7 @@ pub const Bar = struct {
         }
         const occupied = occupiedBuf;
 
-        // ═══ ACTIVE WINDOW TEXT (pre-compute for layout) ═══
+        // Active window text: pre-compute for layout
         const appName: []const u8 = if (ctx.active_toplevel) |at|
             std.mem.sliceTo(&ctx.toplevels[at].app_id, 0)
         else
@@ -265,13 +262,10 @@ pub const Bar = struct {
         else
             std.fmt.bufPrint(&wsBuf, "Workspace {d}", .{activeWs + 1}) catch "Workspace 1";
 
-        // ═══ 1. BAR BACKGROUND ═══
-        // end-4 hug mode: full-width rect with NO radius (radius: 0 in QML)
+        // 1. Bar background: full-width, no radius
         canvas.fillRect(0, 0, bar_w, bar_h, colLayer0);
 
-        // ═══ 2. LEFT SECTION: Sidebar button + Active window ═══
-        // end-4: LeftSidebarButton is transparent by default, only shows colLayer1Hover on hover
-        // Since we can't do hover, draw just the icon without background
+        // 2. Left section: sidebar button + active window
         const sidebarBtnW: i32 = 30;
         const sidebarBtnX: i32 = screenRounding;
 
@@ -288,7 +282,7 @@ pub const Bar = struct {
             canvas.fillCircle(sidebarBtnX + @divTrunc(sidebarBtnW, 2), centerY, 10.0, colOnLayer0);
         }
 
-        // Active window text (10px left margin from button)
+        // Active window text
         const awX: i32 = sidebarBtnX + sidebarBtnW + 10;
         const awMaxW: i32 = lcX - awX;
         if (useShortenedForm == 0) {
@@ -308,9 +302,9 @@ pub const Bar = struct {
             }
         }
 
-        // ═══ 3. CENTER: 3 BarGroups (with vertical separators) ═══
+        // 3. Center: left (resources+media), middle (workspaces), right (indicators)
 
-        // ─── 3a. Left center: Resources + Media ───
+        // 3a. Left center: resources + media
         canvas.fillRoundedRectAA(lcX, groupBgY, centerSideModuleWidth, groupBgH, smallRounding, colLayer1);
 
         var resX: i32 = lcX + groupPadding + 4;
@@ -361,7 +355,7 @@ pub const Bar = struct {
             resX += 46;
         }
 
-        // Optional media widget when module is wide enough (end-4 Media.qml)
+        // Media widget
         if (centerSideModuleWidth > 200) {
             ctx.media_area_x0 = resX;
             ctx.media_area_x1 = lcX + centerSideModuleWidth;
@@ -373,7 +367,7 @@ pub const Bar = struct {
                 const outer_r: i32 = 10;
                 const inner_r: i32 = 8;
                 canvas.fillArc(mediaRingCX, centerY, inner_r, outer_r, half_pi, -two_pi * mediaProgress, colOnSecondaryContainer);
-                // Round caps at arc ends (end-4 ShapePath.RoundCap equivalent)
+                // Round caps
                 const cap_r: f32 = 1.0;
                 const end_angle = half_pi - two_pi * mediaProgress;
                 const mid_r = @as(f32, @floatFromInt((outer_r + inner_r) / 2));
@@ -418,24 +412,21 @@ pub const Bar = struct {
             }
         }
 
-        // ─── 3b. Middle center: Workspaces (end-4 exact) ───
+        // 3b. Middle center: workspaces
         canvas.fillRoundedRectAA(mcX, groupBgY, wsBarGroupW, groupBgH, smallRounding, colLayer1);
 
         const wsY: i32 = centerY - @divTrunc(wsBtnWidth, 2);
         const wsCellX: i32 = mcX + wsBarGroupPadding;
 
-        // 3b-i. Occupied workspace background circles (end-4 connected corners)
-        // When adjacent workspaces are occupied, shared corner radius = 0 (merged shape)
-        // end-4: active ws with no activated window skips occupied bg entirely
+        // Occupied workspace backgrounds (connected corners when adjacent)
         const hasActiveWindow: bool = ctx.active_toplevel != null;
         for (0..wsCount) |i| {
             if (!occupied[i]) continue;
-            // end-4: skip active ws occupied bg when no active windows
+            // Skip active ws occupied bg when no active windows
             if (i == activeWs and !hasActiveWindow) continue;
             const occX: i32 = wsCellX + @as(i32, @intCast(i)) * wsBtnWidth;
 
-            // Compute corner radii based on adjacent occupancy (end-4 logic)
-            // Adjacent ws connects only if its own occupied bg is also visible
+            // Adjacent ws connects only if its own occupied bg is visible
             const prevVisible: bool = if (i > 0) (occupied[i - 1] and !(i - 1 == activeWs and !hasActiveWindow)) else false;
             const nextVisible: bool = if (i + 1 < wsCount) (occupied[i + 1] and !(i + 1 == activeWs and !hasActiveWindow)) else false;
             const r: i32 = wsBtnWidth;
@@ -447,14 +438,13 @@ pub const Bar = struct {
             canvas.fillRoundedRectCorners(occX, wsY, wsBtnWidth, wsBtnWidth, tl, tr, bl, br, colSecondaryContainer);
         }
 
-        // 3b-ii. Active workspace indicator (z-index: middle)
+        // Active workspace indicator
         const activeW: i32 = wsBtnWidth - wsActiveMargin * 2;
         const activeX: i32 = wsCellX + @as(i32, @intCast(activeWs)) * wsBtnWidth + wsActiveMargin;
         const activeY: i32 = wsY + wsActiveMargin;
         canvas.fillRoundedRectAA(activeX, activeY, activeW, activeW, fullRounding, colPrimary);
 
-        // 3b-iii. Workspace button content (z-index: front)
-        // end-4: showNumbers=false by default, show dots (workspaceButtonWidth * 0.18 ≈ 5px)
+        // Workspace button dots
         for (0..wsCount) |i| {
             const btnX: i32 = wsCellX + @as(i32, @intCast(i)) * wsBtnWidth;
             const isActive: bool = i == activeWs;
@@ -467,142 +457,220 @@ pub const Bar = struct {
             else
                 colOnLayer1Inactive;
 
-            // Dot: workspaceButtonWidth * 0.18 = 4.68px diameter (end-4 exact), SDF circle
+            // Dot: wsBtnWidth * 0.18 diameter
             const dotDiam: f32 = @as(f32, @floatFromInt(wsBtnWidth)) * 0.18;
             const dotCX: i32 = btnX + @divTrunc(wsBtnWidth, 2);
             const dotR: f32 = dotDiam * 0.5;
             canvas.fillCircle(dotCX, centerY, dotR, textColor);
         }
 
-        // ─── 3c. Right center: Background (content drawn after indicators) ───
-        canvas.fillRoundedRectAA(rcX, groupBgY, centerSideModuleWidth, groupBgH, smallRounding, colLayer1);
+        // 4. Right group: notifications, indicators, clock, battery
+        // 15px spacing between indicators
+        const indSpacing: i32 = 15;
+        const rightEdgeX = bar_w - screenRounding;
 
-        // ═══ 4. RIGHT SECTION: Indicators (RTL, end-4 BarContent) ═══
-        // end-4 order (right-to-left inside RippleButton, visible in RTL):
-        //   bt → wifi → notif → xkb → mic_off → volume_off
-        //   (rightmost to leftmost)
-        // Plus: SysTray (left of indicators), Weather (left of systray)
-        // Transparent by default, shows colLayer1Hover on hover (not implemented)
-        var indicatorSpacing: i32 = 15;
-
-        // end-4: RippleButton has 10px horizontal padding around indicators
-        // bt right edge = content right edge (no margin to button padding)
-        var rx: i32 = bar_w - screenRounding - 10;
         if (self.font_material) |*fMat| {
-            // Pre-compute widths to check overlap with right center module
             const btW = render_mod.textWidth(fMat, "bluetooth_connected");
             const wifiW = render_mod.textWidth(fMat, "network_wifi");
             const notifW = render_mod.textWidth(fMat, "notifications");
             const micW = render_mod.textWidth(fMat, "mic_off");
             const volW = render_mod.textWidth(fMat, "volume_off");
             const xkbW = if (self.font) |*f| render_mod.textWidth(f, "EN") else 0;
-            const totalW = btW + wifiW + notifW + micW + volW + xkbW;
-            const rightEdge = rcX + centerSideModuleWidth;
-            const needed = rightEdge + 10 + totalW + indicatorSpacing * 5;
-            if (needed > rx) {
-                const available = rx - rightEdge - 10 - totalW;
-                if (available > 0) {
-                    indicatorSpacing = @max(@divTrunc(available, 5), 5);
-                } else {
-                    indicatorSpacing = 5;
-                }
-            }
 
             const tbl = @divTrunc(bar_h - fMat.lineHeight(), 2) + fMat.baselineOffset();
 
-            // RTL draw order: rightmost → leftmost
-
-            // 1. bluetooth (end-4: rightmost, Layout.leftMargin:15 → spacing before bt)
+            // Notification (outside group, no capsule)
+            const notifX = rightEdgeX - groupPadding - notifW;
+            render_mod.renderText(&canvas, fMat, "notifications", notifX, tbl, colOnLayer0);
             {
-                const iw = btW;
-                rx -= iw;
-                render_mod.renderText(&canvas, fMat, "bluetooth_connected", rx, tbl, colOnLayer0);
-            }
-            rx -= indicatorSpacing;
-
-            // 2. network_wifi (end-4: always shown)
-            {
-                const iw = wifiW;
-                rx -= iw;
-                render_mod.renderText(&canvas, fMat, "network_wifi", rx, tbl, colOnLayer0);
-            }
-            rx -= indicatorSpacing;
-
-            // 3. notifications (end-4: Revealer, badge dot when unread)
-            {
-                const iw = notifW;
-                rx -= iw;
-                render_mod.renderText(&canvas, fMat, "notifications", rx, tbl, colOnLayer0);
                 const icon_top = tbl - fMat.baselineOffset();
-                canvas.fillCircle(rx + iw - 5, icon_top + 7, 4.0, colOnLayer0);
+                canvas.fillCircle(notifX + notifW - 5, icon_top + 7, 4.0, colOnLayer0);
             }
-            rx -= indicatorSpacing;
 
-            // 4. xkb layout abbreviation (end-4: regular StyledText, not MaterialSymbol)
+            // Group background (14px left of notifications)
+            const groupRight = notifX - 14;
+            const rightGroupW = groupRight - rcX;
+            if (rightGroupW > 0) {
+                canvas.fillRoundedRectAA(rcX, groupBgY, rightGroupW, groupBgH, smallRounding, colLayer1);
+            }
+
+            // Indicators inside group (RTL)
+            var rx: i32 = groupRight - groupPadding;
+
+            rx -= btW;
+            render_mod.renderText(&canvas, fMat, "bluetooth_connected", rx, tbl, colOnLayer0);
+            rx -= indSpacing;
+
+            rx -= wifiW;
+            render_mod.renderText(&canvas, fMat, "network_wifi", rx, tbl, colOnLayer0);
+            rx -= indSpacing;
+
+            // xkb layout
             if (self.font) |*f| {
                 const fTbl = @divTrunc(bar_h - f.lineHeight(), 2) + f.baselineOffset();
-                const iw = xkbW;
-                rx -= iw;
+                rx -= xkbW;
                 render_mod.renderText(&canvas, f, "EN", rx, fTbl, colOnLayer0);
             }
-            rx -= indicatorSpacing;
+            rx -= indSpacing;
 
-            // 5. mic_off (end-4: Revealer)
+            // Mic
             {
-                const iw = micW;
-                rx -= iw;
-                render_mod.renderText(&canvas, fMat, "mic_off", rx, tbl, colOnLayer0);
+                const micIcon = if (ctx.resources.mic_muted or ctx.resources.mic_volume < 0.01) "mic_off" else "mic";
+                const showCapsule = !ctx.resources.mic_muted and
+                    ctx.resources.mic_volume >= 0.01 and
+                    ctx.now_ms > 0 and
+                    ctx.now_ms - ctx.resources.last_mic_change_ms < 2000;
+                if (showCapsule) {
+                    var pctBuf: [4]u8 = undefined;
+                    const pctStr: []const u8 = blk: {
+                        const p = @as(u32, @intFromFloat(ctx.resources.mic_volume * 100));
+                        if (self.font != null) break :blk std.fmt.bufPrint(pctBuf[0..], "{}", .{p}) catch "0";
+                        break :blk "";
+                    };
+                    const pctW: i32 = if (self.font) |*f| render_mod.textWidth(f, pctStr) else 0;
+                    const capPad: i32 = 8;
+                    const capsuleW = micW + capPad + pctW + capPad;
+                    const capH: i32 = 22;
+                    const capY = @divTrunc(bar_h - capH, 2);
+                    const capRounding: i32 = @divTrunc(capH, 2);
+                    const capsuleX = rx - capsuleW;
+                    canvas.fillRoundedRectAA(capsuleX, capY, capsuleW, capH, capRounding, colSecondaryContainer);
+                    const iconX = capsuleX + 4;
+                    rx = iconX;
+                    render_mod.renderText(&canvas, fMat, micIcon, rx, tbl, colOnLayer0);
+                    if (self.font) |*f| {
+                        const pctX = capsuleX + capsuleW - capPad - pctW;
+                        const fTbl = @divTrunc(bar_h - f.lineHeight(), 2) + f.baselineOffset();
+                        const pctColor = if (ctx.resources.mic_volume > 1.0) colVolHigh else colOnLayer0;
+                        render_mod.renderText(&canvas, f, pctStr, pctX, fTbl, pctColor);
+                    }
+                    rx = capsuleX;
+                } else {
+                    rx -= micW;
+                    render_mod.renderText(&canvas, fMat, micIcon, rx, tbl, colOnLayer0);
+                }
             }
-            rx -= indicatorSpacing;
+            rx -= indSpacing;
 
-            // 6. volume_off (end-4: leftmost, no margin after — button padding handles it)
+            // Volume
             {
-                const iw = volW;
-                rx -= iw;
-                render_mod.renderText(&canvas, fMat, "volume_off", rx, tbl, colOnLayer0);
+                const volIcon = if (ctx.resources.audio_muted or ctx.resources.audio_volume < 0.01) "volume_off" else "volume_up";
+                const showCapsule = !ctx.resources.audio_muted and
+                    ctx.resources.audio_volume >= 0.01 and
+                    ctx.now_ms > 0 and
+                    ctx.now_ms - ctx.resources.last_vol_change_ms < 2000;
+
+                if (showCapsule) {
+                    var volPctBuf: [4]u8 = undefined;
+                    const pctStr: []const u8 = blk: {
+                        const p = @as(u32, @intFromFloat(ctx.resources.audio_volume * 100));
+                        if (self.font != null) break :blk std.fmt.bufPrint(volPctBuf[0..], "{}", .{p}) catch "0";
+                        break :blk "";
+                    };
+                    const pctW_vol: i32 = if (self.font) |*f| render_mod.textWidth(f, pctStr) else 0;
+
+                    // Capsule dimensions
+                    const capPad: i32 = 8;
+                    const capsuleW = volW + capPad + pctW_vol + capPad;
+                    const capH: i32 = 22;
+                    const capY = @divTrunc(bar_h - capH, 2);
+                    const capRounding: i32 = @divTrunc(capH, 2);
+                    const capsuleX = rx - capsuleW;
+                    canvas.fillRoundedRectAA(capsuleX, capY, capsuleW, capH, capRounding, colSecondaryContainer);
+
+                    // Icon at capsule left
+                    const iconX = capsuleX + 4;
+                    rx = iconX; // update rx for RTL tracking
+                    render_mod.renderText(&canvas, fMat, volIcon, rx, tbl, colOnLayer0);
+
+                    // Percentage
+                    if (self.font) |*f| {
+                        const pctX = capsuleX + capsuleW - capPad - pctW_vol;
+                        const fTbl = @divTrunc(bar_h - f.lineHeight(), 2) + f.baselineOffset();
+                        const pctColor = if (ctx.resources.audio_volume > 1.0) colVolHigh else colOnLayer0;
+                        render_mod.renderText(&canvas, f, pctStr, pctX, fTbl, pctColor);
+                    }
+                    // Advance rx for next item
+                    rx = capsuleX;
+                } else {
+                    rx -= volW;
+                    render_mod.renderText(&canvas, fMat, volIcon, rx, tbl, colOnLayer0);
+                }
             }
-            // NO spacing after last item
-        }
+            rx -= 8; // spacing between indicators and battery
 
-        // ═══ 5. RIGHT CENTER CONTENT: Clock + Battery (drawn above indicators) ═══
-        if (self.font) |*f| {
-            const tbl = @divTrunc(bar_h - f.lineHeight(), 2) + f.baselineOffset();
-            const clockStr = "12:34";
-            const sepStr = "\u{2022}";
-            const dateStr = "Mon 6 Jul";
-            const clockW: i32 = render_mod.textWidth(f, clockStr);
-            const sepW: i32 = render_mod.textWidth(f, sepStr);
-            const dateW: i32 = render_mod.textWidth(f, dateStr);
-            const totalClockW: i32 = clockW + 4 + sepW + 4 + dateW;
-            var cx: i32 = rcX + @divTrunc(centerSideModuleWidth - totalClockW, 2);
-            render_mod.renderText(&canvas, f, clockStr, cx, tbl, colOnLayer1);
-            cx += clockW + 4;
-            render_mod.renderText(&canvas, f, sepStr, cx, tbl, colOnLayer1);
-            cx += sepW + 4;
-            render_mod.renderText(&canvas, f, dateStr, cx, tbl, colOnLayer1);
-        }
+            // Battery + Clock
+            const leftContentX = rcX + groupPadding;
 
-        // Battery indicator (end-4 ClippedProgressBar, respects BarGroup padding=5)
-        const batW: i32 = 30;
-        const batH: i32 = 18;
-        const batX: i32 = rcX + centerSideModuleWidth - batW - groupPadding;
-        const batY: i32 = centerY - @divTrunc(batH, 2);
-        const batTrack = Color.rgba(0xec, 0xe6, 0xe9, 0x80);
-        canvas.fillRoundedRectAA(batX, batY, batW, batH, fullRounding, batTrack);
-        const batFillW: i32 = @divTrunc(batW * 80, 100);
-        if (batFillW > 0) {
-            canvas.fillRoundedRectAA(batX, batY, batFillW, batH, fullRounding, colOnSecondaryContainer);
-        }
-        {
+            // Battery
+            const batW: i32 = 30;
+            const batH: i32 = 18;
+            const batPct = ctx.resources.battery_pct;
+            const hasBattery = batPct >= 0;
+            const batX: i32 = rx - batW;
+            if (hasBattery and batX >= leftContentX) {
+                const batY: i32 = centerY - @divTrunc(batH, 2);
+                const batTrack = Color.rgba(0xec, 0xe6, 0xe9, 0x80);
+                canvas.fillRoundedRectAA(batX, batY, batW, batH, fullRounding, batTrack);
+                const batFillW: i32 = @divTrunc(batW * @as(i32, @intCast(@max(batPct, 0))), 100);
+                if (batFillW > 0) {
+                    canvas.fillRoundedRectAA(batX, batY, batFillW, batH, fullRounding, colOnSecondaryContainer);
+                }
+                if (self.font) |*f| {
+                    const batTbl = batY + @divTrunc(batH - f.lineHeight(), 2) + f.baselineOffset();
+                    var batBuf: [4]u8 = undefined;
+                    const batStr = std.fmt.bufPrint(batBuf[0..], "{}", .{batPct}) catch "0";
+                    const batTW: i32 = render_mod.textWidth(f, batStr);
+                    render_mod.renderText(&canvas, f, batStr, batX + @divTrunc(batW - batTW, 2), batTbl, colLayer1);
+                }
+                rx = batX - 8;
+            }
+
+            // Clock
             if (self.font) |*f| {
-                const tbl = batY + @divTrunc(batH - f.lineHeight(), 2) + f.baselineOffset();
-                const batStr = "80";
-                const batTW: i32 = render_mod.textWidth(f, batStr);
-                render_mod.renderText(&canvas, f, batStr, batX + @divTrunc(batW - batTW, 2), tbl, colLayer1);
+                const c = @import("c.zig").c;
+                var raw: c.time_t = undefined;
+                _ = c.time(&raw);
+                var tm: c.tm = undefined;
+                _ = c.localtime_r(&raw, &tm);
+
+                const hour = @as(u32, @intCast(tm.tm_hour));
+                const min = @as(u32, @intCast(tm.tm_min));
+
+                var timeBuf: [6]u8 = undefined;
+                const clockStr = std.fmt.bufPrint(timeBuf[0..], "{d:0>2}:{d:0>2}", .{ hour, min }) catch "12:34";
+
+                const day_names = [_][]const u8{ "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+                const day_idx = @as(usize, @intCast(@max(tm.tm_wday, 0)));
+                const day_name = day_names[day_idx];
+
+                const month_names = [_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+                const month_idx = @as(usize, @intCast(@max(tm.tm_mon, 0)));
+                const month_name = month_names[month_idx];
+
+                var dateBuf: [12]u8 = undefined;
+                const dateStr = std.fmt.bufPrint(dateBuf[0..], "{s} {d} {s}", .{ day_name, tm.tm_mday, month_name }) catch "Mon 6 Jul";
+
+                const sepStr = "\u{2022}";
+                const clockW = render_mod.textWidth(f, clockStr);
+                const sepW = render_mod.textWidth(f, sepStr);
+                const dateW = render_mod.textWidth(f, dateStr);
+                const totalClockW = clockW + 4 + sepW + 4 + dateW;
+                const clockAvail = rx - leftContentX;
+                if (clockAvail > 0) {
+                    const clockTbl = @divTrunc(bar_h - f.lineHeight(), 2) + f.baselineOffset();
+                    var cx: i32 = leftContentX + @divTrunc(clockAvail - totalClockW, 2);
+                    if (cx < leftContentX) cx = leftContentX;
+                    render_mod.renderText(&canvas, f, clockStr, cx, clockTbl, colOnLayer1);
+                    cx += clockW + 4;
+                    render_mod.renderText(&canvas, f, sepStr, cx, clockTbl, colOnLayer1);
+                    cx += sepW + 4;
+                    render_mod.renderText(&canvas, f, dateStr, cx, clockTbl, colOnLayer1);
+                }
             }
         }
 
-        // ═══ 6. COMMIT ═══
+        // 6. Commit to compositor
         self.layer.surface.attach(buf.buffer, 0, 0);
         self.layer.surface.damageBuffer(0, 0, @intCast(buf.width), @intCast(buf.height));
         self.layer.surface.commit();
@@ -612,9 +680,7 @@ pub const Bar = struct {
     }
 };
 
-// ═══════════════════════════════════════════════════════════
-// Input dispatch — seat listener, pointer/keyboard, click
-// ═══════════════════════════════════════════════════════════
+// Input dispatch: seat, pointer, keyboard, click handling
 
 pub fn seatListener(seat: *wl.Seat, event: wl.Seat.Event, ctx: *Context) void {
     switch (event) {
@@ -706,7 +772,90 @@ fn pointerListener(pointer: *wl.Pointer, event: wl.Pointer.Event, ctx: *Context)
         .leave => {
             ctx.pointer_surface = null; // invalidate surface tracking, keep coordinates
         },
-        .axis, .frame, .axis_stop, .axis_value120, .axis_discrete, .axis_source => {},
+        .axis, .frame, .axis_source => {},
+        .axis_stop => {
+            ctx.scroll_accum = 0;
+        },
+        .axis_discrete => |disc| {
+            if (disc.axis != .vertical_scroll) return;
+            const bar_w: i32 = if (ctx.output_count > 0) ctx.outputs[0].mode_w else 1366;
+            const bar_h: i32 = 40;
+            const ws = getWorkspaceLayout(bar_w, bar_h);
+            const wsX0 = ws.wsCellX;
+            const wsX1 = ws.wsCellX + ws.wsBtnWidth * ws.wsCount;
+            if (ctx.pointer_x >= wsX0 and ctx.pointer_x < wsX1 and
+                ctx.pointer_y >= ws.wsY and ctx.pointer_y < ws.wsY + ws.wsBtnWidth)
+            {
+                feedScrollAccum(ctx, disc.discrete * 120);
+                return;
+            }
+            var fMat: ?*Font = null;
+            for (0..output_count) |oi| {
+                if (outputs[oi].bar) |*b| { if (b.font_material) |*fm| { fMat = fm; break; } }
+            }
+            if (fMat) |fm| {
+                {
+                    const mb = getMicIconBounds(bar_w, fm);
+                    if (ctx.pointer_x >= mb.x0 and ctx.pointer_x < mb.x0 + mb.w and
+                        ctx.pointer_y >= 0 and ctx.pointer_y < bar_h)
+                    {
+                        const delta: f32 = if (disc.discrete < 0) 0.04 else -0.04;
+                        config_mod.setMicVolume(&ctx.resources, ctx.resources.mic_volume + delta);
+                        markAllDirty(ctx);
+                    }
+                }
+                {
+                    const vb = getVolumeIconBounds(bar_w, fm);
+                    if (ctx.pointer_x >= vb.x0 and ctx.pointer_x < vb.x0 + vb.w and
+                        ctx.pointer_y >= 0 and ctx.pointer_y < bar_h)
+                    {
+                        const delta: f32 = if (disc.discrete < 0) 0.04 else -0.04;
+                        config_mod.setVolume(&ctx.resources, ctx.resources.audio_volume + delta);
+                        markAllDirty(ctx);
+                    }
+                }
+            }
+        },
+        .axis_value120 => |v120| {
+            if (v120.axis != .vertical_scroll) return;
+            const bar_w: i32 = if (ctx.output_count > 0) ctx.outputs[0].mode_w else 1366;
+            const bar_h: i32 = 40;
+            const ws = getWorkspaceLayout(bar_w, bar_h);
+            const wsX0 = ws.wsCellX;
+            const wsX1 = ws.wsCellX + ws.wsBtnWidth * ws.wsCount;
+            if (ctx.pointer_x >= wsX0 and ctx.pointer_x < wsX1 and
+                ctx.pointer_y >= ws.wsY and ctx.pointer_y < ws.wsY + ws.wsBtnWidth)
+            {
+                feedScrollAccum(ctx, v120.value120);
+                return;
+            }
+            var fMat: ?*Font = null;
+            for (0..output_count) |oi| {
+                if (outputs[oi].bar) |*b| { if (b.font_material) |*fm| { fMat = fm; break; } }
+            }
+            if (fMat) |fm| {
+                {
+                    const mb = getMicIconBounds(bar_w, fm);
+                    if (ctx.pointer_x >= mb.x0 and ctx.pointer_x < mb.x0 + mb.w and
+                        ctx.pointer_y >= 0 and ctx.pointer_y < bar_h)
+                    {
+                        const delta: f32 = if (v120.value120 < 0) 0.04 else -0.04;
+                        config_mod.setMicVolume(&ctx.resources, ctx.resources.mic_volume + delta);
+                        markAllDirty(ctx);
+                    }
+                }
+                {
+                    const vb = getVolumeIconBounds(bar_w, fm);
+                    if (ctx.pointer_x >= vb.x0 and ctx.pointer_x < vb.x0 + vb.w and
+                        ctx.pointer_y >= 0 and ctx.pointer_y < bar_h)
+                    {
+                        const delta: f32 = if (v120.value120 < 0) 0.04 else -0.04;
+                        config_mod.setVolume(&ctx.resources, ctx.resources.audio_volume + delta);
+                        markAllDirty(ctx);
+                    }
+                }
+            }
+        },
     }
 }
 
@@ -719,59 +868,137 @@ fn keyboardListener(kb: *wl.Keyboard, event: wl.Keyboard.Event, ctx: *Context) v
     }
 }
 
+/// Add value to scroll_accum and fire workspace switches at each ±120 threshold.
+/// Both axis_discrete and axis_value120 share this accumulator so they don't double-switch.
+fn feedScrollAccum(ctx: *Context, value: i32) void {
+    ctx.scroll_accum += value;
+    const threshold: i32 = 120;
+    while (ctx.scroll_accum >= threshold) {
+        ctx.scroll_accum -= threshold;
+        const target = if (ctx.active_workspace) |aw|
+            @min(ctx.workspace_count - 1, aw + 1)
+        else 0;
+        switchToWorkspace(ctx, @intCast(target));
+    }
+    while (ctx.scroll_accum <= -threshold) {
+        ctx.scroll_accum += threshold;
+        const target = if (ctx.active_workspace) |aw|
+            aw -| 1
+        else 0;
+        switchToWorkspace(ctx, @intCast(target));
+    }
+}
+
+/// Switch to a workspace by index.
+/// Uses dwl-ipc for MangoWM, otherwise ext-workspace or river-control.
+/// Does NOT mark dirty — compositor response events trigger the redraw (avoids blink).
+fn switchToWorkspace(ctx: *Context, idx: usize) void {
+    if (ctx.dwl_ipc_output) |dwl| {
+        const tagmask: u32 = @as(u32, 1) << @intCast(idx);
+        dwl.setTags(tagmask, 1);
+    } else if (ctx.river_control) |ctrl| {
+        if (ctx.seat) |seat| {
+            const tag = @as(u32, 1) << @intCast(idx);
+            var buf: [32]u8 = undefined;
+            const tag_str = std.fmt.bufPrint(&buf, "{d}", .{tag}) catch "1";
+            buf[tag_str.len] = 0;
+            ctrl.addArgument("set-focused-tags");
+            ctrl.addArgument(buf[0..tag_str.len :0]);
+            _ = ctrl.runCommand(seat) catch {};
+        }
+    } else if (ctx.workspace_manager != null and idx < ctx.workspace_count) {
+        if (ctx.active_workspace) |aw| ctx.workspaces[aw].handle.deactivate();
+        ctx.workspaces[idx].handle.activate();
+    }
+    ctx.flush();
+}
+
+const WorkspaceLayout = struct {
+    wsCellX: i32,
+    wsBtnWidth: i32,
+    wsY: i32,
+    wsCount: i32,
+};
+
+fn getMicIconBounds(bar_w: i32, fMat: *Font) struct { x0: i32, w: i32 } {
+    const btW = render_mod.textWidth(fMat, "bluetooth_connected");
+    const wifiW = render_mod.textWidth(fMat, "network_wifi");
+    const notifW = render_mod.textWidth(fMat, "notifications");
+    const micW = render_mod.textWidth(fMat, "mic_off");
+    const xkbW: i32 = 20;
+    const rightEdgeX = bar_w - 23;
+    const notif_x0 = rightEdgeX - 5 - notifW;
+    const groupRight = notif_x0 - 10;
+    var rx: i32 = groupRight - 5;
+    rx -= btW + 15;
+    rx -= wifiW + 15;
+    rx -= xkbW + 15;
+    return .{ .x0 = rx - micW, .w = micW };
+}
+
+fn getVolumeIconBounds(bar_w: i32, fMat: *Font) struct { x0: i32, w: i32 } {
+    const btW = render_mod.textWidth(fMat, "bluetooth_connected");
+    const wifiW = render_mod.textWidth(fMat, "network_wifi");
+    const notifW = render_mod.textWidth(fMat, "notifications");
+    const micW = render_mod.textWidth(fMat, "mic_off");
+    const volW = render_mod.textWidth(fMat, "volume_off");
+    const xkbW: i32 = 20;
+    const rightEdgeX = bar_w - 23;
+    const notif_x0 = rightEdgeX - 5 - notifW;
+    const groupRight = notif_x0 - 10;
+    var rx: i32 = groupRight - 5;
+    rx -= btW + 15;
+    rx -= wifiW + 15;
+    rx -= xkbW + 15;
+    rx -= micW + 15;
+    return .{ .x0 = rx - volW, .w = volW };
+}
+
+fn getWorkspaceLayout(bar_w: i32, bar_h: i32) WorkspaceLayout {
+    const centerModW: i32 = if (bar_w > 1200) 360 else if (bar_w > 1000) 280 else 190;
+    const wsBtnWidth: i32 = 26;
+    const wsCount: i32 = Appearance.ws_count;
+    const wsTotalWidth: i32 = wsBtnWidth * wsCount;
+    const wsBarGroupW: i32 = wsTotalWidth + 4 * 2;
+    const centerTotal: i32 = centerModW + 4 + wsBarGroupW + 4 + centerModW;
+    const centerX: i32 = @divTrunc(bar_w - centerTotal, 2);
+    const mcX: i32 = centerX + centerModW + 4;
+    const wsCellX: i32 = mcX + 4;
+    const wsY: i32 = @divTrunc(bar_h, 2) - @divTrunc(wsBtnWidth, 2);
+    return .{ .wsCellX = wsCellX, .wsBtnWidth = wsBtnWidth, .wsY = wsY, .wsCount = wsCount };
+}
+
 fn handleClick(ctx: *Context, x: i32, y: i32, button: u32) void {
     const bar_h: i32 = 40;
     const bar_w: i32 = ctx.outputs[0].mode_w;
     const screenRounding: i32 = 23;
-    const centerSpacing: i32 = 4;
-    const centerModW: i32 = if (bar_w > 1200) 360 else if (bar_w > 1000) 280 else 190;
-    const wsBtnWidth: i32 = 26;
-    const wsBarGroupPadding: i32 = 4;
-    const wsCount: i32 = Appearance.ws_count;
-    const wsTotalWidth: i32 = wsBtnWidth * wsCount;
-    const wsBarGroupW: i32 = wsTotalWidth + wsBarGroupPadding * 2;
 
-    const centerY: i32 = @divTrunc(bar_h, 2);
-    const centerTotal: i32 = centerModW + centerSpacing + wsBarGroupW + centerSpacing + centerModW;
-    const centerX: i32 = @divTrunc(bar_w - centerTotal, 2);
-    const mcX: i32 = centerX + centerModW + centerSpacing;
-    const wsCellX: i32 = mcX + wsBarGroupPadding;
-    const wsY: i32 = centerY - @divTrunc(wsBtnWidth, 2);
-
-    // Dismiss popup on click outside media area (end-4: click anywhere else closes media controls)
     const on_media = x >= ctx.media_area_x0 and x < ctx.media_area_x1 and y >= 0 and y < bar_h;
     if (!on_media and ctx.popup_surface != null) {
         ctx.media_popup.hide(ctx);
     }
 
-    // Media player controls (end-4: left=mediaControls popup, middle=playPause, right/forward=next, back=prev)
     if (on_media) {
         if (ctx.mpris) |mpris| {
-            if (button == 0x110) { // BTN_LEFT → toggle media controls popup
+            if (button == 0x110) {
                 ctx.media_popup.toggle(ctx);
-            } else if (button == 0x112) { // BTN_MIDDLE → play/pause
+            } else if (button == 0x112) {
                 mpris.playPause();
-            } else if (button == 0x111 or button == 0x115) { // BTN_RIGHT or BTN_FORWARD → next
+            } else if (button == 0x111 or button == 0x115) {
                 mpris.next();
-            } else if (button == 0x116) { // BTN_BACK → previous
+            } else if (button == 0x116) {
                 mpris.previous();
             }
         }
         return;
     }
 
-    // Workspace click detection (fixed 26px buttons)
-    for (0..@as(usize, @intCast(wsCount))) |i| {
-        const btnX: i32 = wsCellX + @as(i32, @intCast(i)) * wsBtnWidth;
-        if (y >= wsY and y < wsY + wsBtnWidth and x >= btnX and x < btnX + wsBtnWidth) {
+    const wsl = getWorkspaceLayout(bar_w, bar_h);
+    for (0..@as(usize, @intCast(wsl.wsCount))) |i| {
+        const btnX: i32 = wsl.wsCellX + @as(i32, @intCast(i)) * wsl.wsBtnWidth;
+        if (y >= wsl.wsY and y < wsl.wsY + wsl.wsBtnWidth and x >= btnX and x < btnX + wsl.wsBtnWidth) {
             std.log.info("workspace {d} clicked", .{i});
-            if (ctx.active_workspace) |aw| ctx.workspaces[aw].handle.deactivate();
-            if (i < ctx.workspace_count) {
-                ctx.workspaces[i].handle.activate();
-                ctx.active_workspace = i;
-            }
-            ctx.roundtrip();
-            markAllDirty(ctx);
+            switchToWorkspace(ctx, i);
             return;
         }
     }
@@ -782,10 +1009,55 @@ fn handleClick(ctx: *Context, x: i32, y: i32, button: u32) void {
         return;
     }
 
-    // Right section indicators (RTL, 6 items, end-4)
-    const indicatorItemCount: i32 = 6;
-    _ = indicatorItemCount;
-    // Rough indicator area: from screenRounding from right edge, ~200px wide
+    var fMat_click: *Font = undefined;
+    var hasFont: bool = false;
+    for (0..output_count) |oi| {
+        if (outputs[oi].bar) |*b| {
+            if (b.font_material) |*fm| {
+                fMat_click = fm;
+                hasFont = true;
+                break;
+            }
+        }
+    }
+    if (hasFont) {
+        const btW_click = render_mod.textWidth(fMat_click, "bluetooth_connected");
+        const wifiW_click = render_mod.textWidth(fMat_click, "network_wifi");
+        const notifW_click = render_mod.textWidth(fMat_click, "notifications");
+        const micW_click = render_mod.textWidth(fMat_click, "mic_off");
+        const volW_click = render_mod.textWidth(fMat_click, "volume_off");
+        const xkbW_click: i32 = 20;
+        const indSpacing: i32 = 15;
+        const groupPadding: i32 = 5;
+        const rightEdgeX = bar_w - screenRounding;
+
+        const notif_x0 = rightEdgeX - groupPadding - notifW_click;
+        if (x >= notif_x0 and x < notif_x0 + notifW_click and y >= 0 and y < bar_h) {
+            std.log.info("notifications clicked", .{});
+            return;
+        }
+
+        const groupRight = notif_x0 - 10;
+        var indicatorRX: i32 = groupRight - groupPadding;
+        indicatorRX -= btW_click + indSpacing;
+        indicatorRX -= wifiW_click + indSpacing;
+        indicatorRX -= xkbW_click + indSpacing;
+        const mic_x0 = indicatorRX - micW_click;
+        indicatorRX -= micW_click + indSpacing;
+        const vol_x0 = indicatorRX - volW_click;
+
+        if (x >= vol_x0 and x < vol_x0 + volW_click and y >= 0 and y < bar_h) {
+            config_mod.toggleAudioMute(&ctx.resources);
+            markAllDirty(ctx);
+            return;
+        }
+        if (x >= mic_x0 and x < mic_x0 + micW_click and y >= 0 and y < bar_h) {
+            config_mod.toggleMicMute(&ctx.resources);
+            markAllDirty(ctx);
+            return;
+        }
+    }
+
     const indicatorAreaX: i32 = bar_w - screenRounding - 200;
     if (x >= indicatorAreaX and x < bar_w - screenRounding and y >= 0 and y < bar_h) {
         std.log.info("right indicator area clicked", .{});

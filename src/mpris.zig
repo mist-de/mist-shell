@@ -129,7 +129,7 @@ pub const MprisPlayer = struct {
         const path: [*:0]const u8 = "/org/mpris/MediaPlayer2";
         const iface_player: [*:0]const u8 = "org.mpris.MediaPlayer2.Player";
 
-        // PlaybackStatus via sd_bus_get_property_string
+        // PlaybackStatus
         {
             var error_val: bc.sd_bus_error = std.mem.zeroes(bc.sd_bus_error);
             defer bc.sd_bus_error_free(&error_val);
@@ -146,7 +146,7 @@ pub const MprisPlayer = struct {
             }
         }
 
-        // Position via sd_bus_get_property_trivial (type 'x' = int64)
+        // Position
         {
             var error_val: bc.sd_bus_error = std.mem.zeroes(bc.sd_bus_error);
             defer bc.sd_bus_error_free(&error_val);
@@ -158,7 +158,7 @@ pub const MprisPlayer = struct {
             }
         }
 
-        // Metadata via sd_bus_get_property with type "a{sv}" — manual dict parsing
+        // Metadata dict parsing
         self.readMetadata(bus, dest, path, iface_player);
     }
 
@@ -167,16 +167,16 @@ pub const MprisPlayer = struct {
         defer bc.sd_bus_error_free(&error_val);
 
         var reply: ?*bc.sd_bus_message = null;
-        // sd_bus_get_property enters the variant internally, cursor at array
+        // Enter variant (sd_bus_get_property enters internally)
         var rc = bc.sd_bus_get_property(bus, dest, path, iface, "Metadata", &error_val, &reply, "a{sv}");
-        // Fallback: try sd_bus_call_method if get_property fails
+        // Fallback to call_method
         if (rc < 0) {
             bc.sd_bus_error_free(&error_val);
             error_val = std.mem.zeroes(bc.sd_bus_error);
             rc = bc.sd_bus_call_method(bus, dest, path, "org.freedesktop.DBus.Properties", "Get",
                 &error_val, &reply, "ss", iface, "Metadata");
             if (rc < 0) return;
-            // Enter the variant that contains the a{sv} dict
+            // Enter variant containing a{sv}
             rc = bc.sd_bus_message_enter_container(reply, 'v', "a{sv}");
             if (rc <= 0) {
                 _ = bc.sd_bus_message_unref(reply);
@@ -212,7 +212,7 @@ pub const MprisPlayer = struct {
             };
             const ks = std.mem.span(k);
 
-            // Peek variant type before entering (StackOverflow pattern)
+            // Peek variant type
             var vt_str: [*c]const u8 = undefined;
             rrc = bc.sd_bus_message_peek_type(m, null, @ptrCast(&vt_str));
             if (rrc <= 0) {
@@ -221,7 +221,7 @@ pub const MprisPlayer = struct {
             }
             const vt = if (vt_str) |p| p[0] else 0;
 
-            // Enter variant with peeked type as expected contents
+            // Enter variant
             rrc = bc.sd_bus_message_enter_container(m, 'v', vt_str);
             if (rrc <= 0) {
                 _ = bc.sd_bus_message_exit_container(m);
@@ -326,14 +326,13 @@ pub const MprisPlayer = struct {
         return h;
     }
 
-    /// If player doesn't provide mpris:artUrl, extract YouTube video ID from xesam:url
-    /// and construct img.youtube.com thumbnail URL.
+    /// YouTube thumbnail fallback from xesam:url
     fn tryYouTubeThumbnail(self: *MprisPlayer) void {
         if (self.url.len < 11) return;
 
         const url = self.url;
 
-        // Pattern: youtube.com/watch?v=VIDEO_ID
+        // youtube.com/watch?v=
         if (std.mem.indexOf(u8, url, "youtube.com/watch")) |_| {
             if (std.mem.indexOf(u8, url, "v=")) |vpos| {
                 const start = vpos + 2;
@@ -347,7 +346,7 @@ pub const MprisPlayer = struct {
             }
         }
 
-        // Pattern: youtu.be/VIDEO_ID
+        // youtu.be/
         if (std.mem.indexOf(u8, url, "youtu.be/")) |pos| {
             const start = pos + 9;
             var end = start;
@@ -366,8 +365,7 @@ pub const MprisPlayer = struct {
         self.art_url = buf[0..thumbnail_url.len :0];
     }
 
-    /// Load album art: convert URL to 110x110 RGB via ImageMagick.
-    /// Only saves URL on success — failures are retried on next query().
+    /// Load album art: 110x110 RGB via ImageMagick convert
     fn loadAlbumArt(self: *MprisPlayer) void {
         if (self.art_url.len == 0) return;
 
@@ -396,7 +394,7 @@ pub const MprisPlayer = struct {
             }
         }
 
-        // Build source path: strip file:// prefix
+        // Strip file:// prefix
         var src_buf: [2000]u8 = undefined;
         const src_path: [:0]const u8 = if (std.mem.startsWith(u8, self.art_url, "file://")) blk: {
             const stripped = self.art_url[7..];
@@ -406,7 +404,7 @@ pub const MprisPlayer = struct {
             break :blk src_buf[0..len :0];
         } else self.art_url;
 
-        // Run convert
+        // ImageMagick convert
         var cmd_buf: [3000]u8 = undefined;
         const cmd = std.fmt.bufPrint(&cmd_buf, "convert '{s}' -resize 110x110! -depth 8 'rgb:{s}' 2>/dev/null",
             .{ src_path, cache_path }) catch return;
@@ -434,7 +432,7 @@ pub const MprisPlayer = struct {
         }
     }
 
-    /// Called every main loop iteration to kick off pending art loading.
+    /// Process pending art load
     pub fn tickArtLoading(self: *MprisPlayer) void {
         if (self.art_load_needed) {
             self.art_load_needed = false;

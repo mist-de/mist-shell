@@ -11,7 +11,8 @@ pkgs.mkShell {
     freetype
     harfbuzz
     basu
-    river
+    imagemagick
+    wireplumber
   ];
 
   WAYLAND_XML = "${pkgs.wayland-scanner}/share/wayland/wayland.xml";
