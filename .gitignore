@@ -3,6 +3,13 @@
 /zig-out/
 /zig-pkg/
 
+# Compiled objects and test binaries
+*.o
+*_test
+*_test.exe
+check_xkb
+test_xkb
+
 # Archives
 *.zip
 
@@ -22,8 +29,9 @@ Thumbs.db
 .env
 *.local
 
-# Wayland dependency symlinks (nixos-specific)
-.wayland-dep/
+# Nix build output
+result
+result-*
 
-# Wayland scanner binary (generated artifact)
-test-scanner
+# Wayland dependency symlinks
+.wayland-dep/

@@ -37,7 +37,6 @@ pub const Sidebar = struct {
     output_idx: usize = 0,
     initialized: bool = false,
 
-    // Animation state
     anim_x: i32 = 0,
     anim_target_x: i32 = 0,
     anim_start_x: i32 = 0,
@@ -49,15 +48,12 @@ pub const Sidebar = struct {
     pending_height: i32 = 0,
     screen_h: i32 = 0,
 
-    // BottomWidgetGroup state
     bottom_collapsed: bool = false,
-    selected_tab: u2 = 0, // 0=calendar, 1=todo, 2=timer
+    selected_tab: u2 = 0,
     surface_created: bool = false,
 
-    // Calendar navigation state
-    cal_month_offset: i32 = 0, // months offset from current (0=this month, -1=last month, etc.)
+    cal_month_offset: i32 = 0,
 
-    // Todo state
     todo_items: [128]TodoTask = undefined,
     todo_count: usize = 0,
     todo_showing_done: bool = false,
@@ -150,26 +146,22 @@ pub const Sidebar = struct {
         ls.setExclusiveZone(0);
         ls.setListener(*Sidebar, layerSurfaceListener, self);
 
-        // Surface is placed off-screen via negative right margin.
-        // anim_x tracks the margin distance from the edge:
-        //   0 = fully visible (margin_right = 0)
-        //   SIDEBAR_W = fully hidden (margin_right = -SIDEBAR_W)
+        // Start off-screen via negative margin
         self.anim_x = SIDEBAR_W;
         self.anim_target_x = SIDEBAR_W;
         ls.setMargin(0, -SIDEBAR_W, 0, 0);
 
-        // First commit (no buffer) triggers configure event
+        // First commit triggers configure
         wl_surface.commit();
         ctx.flush();
         ctx.roundtrip();
-        // Now layer surface is configured — update height from configure event
         if (self.pending_height > 0) {
             self.height = self.pending_height;
         } else {
             self.height = self.screen_h;
         }
 
-        // Create buffer (deinit old one if re-creating after destroy)
+        // Create buffer
         const shm = ctx.shm orelse return false;
         if (self.buffer) |*old| old.deinit();
         self.buffer = ShmBuffer.create(shm, SIDEBAR_W, self.height) catch return false;
@@ -224,23 +216,21 @@ pub const Sidebar = struct {
         self.visible = true;
         ctx.notifications.timeoutAllPopups();
 
-        // Cancel any stale frame callback
         if (self.anim_frame_callback) |cb| {
             cb.destroy();
             self.anim_frame_callback = null;
         }
         self.anim_pending_frame = false;
 
-        // Only redraw if buffer hasn't been rendered yet
         self.scroll_offset = 0;
         if (self.buffer != null and !self.needs_full_redraw and !self.needs_redraw) {
-            // Buffer has valid content — skip expensive MSAA draw
+            // Buffer valid, skip redraw
         } else {
             self.needs_full_redraw = true;
             self.draw(ctx);
         }
 
-        // Start slide-in: margin -SIDEBAR_W → 0 (200ms ease-out cubic)
+        // Slide-in animation
         self.anim_x = SIDEBAR_W;
         self.anim_start_x = SIDEBAR_W;
         self.anim_target_x = 0;
@@ -248,7 +238,6 @@ pub const Sidebar = struct {
         self.anim_duration_ms = 200;
         self.animating = true;
 
-        // First frame: margin off-screen (hidden), attach buffer, commit
         const ls = self.layer_surface orelse return;
         const buf = self.buffer orelse return;
         const s = self.surface orelse return;
@@ -265,14 +254,13 @@ pub const Sidebar = struct {
     pub fn hide(self: *Sidebar, ctx: *Context) void {
         if (!self.visible) return;
 
-        // Cancel any stale frame callback
         if (self.anim_frame_callback) |cb| {
             cb.destroy();
             self.anim_frame_callback = null;
         }
         self.anim_pending_frame = false;
 
-        // Start slide-out from current margin → -SIDEBAR_W (200ms ease-out cubic)
+        // Slide-out animation
         const current_x = if (self.animating) self.anim_x else 0;
         self.anim_x = current_x;
         self.anim_start_x = current_x;
@@ -287,7 +275,6 @@ pub const Sidebar = struct {
 
     pub fn animate(self: *Sidebar, ctx: *Context) void {
         if (!self.animating) return;
-        // Wait for compositor to finish rendering the previous frame
         if (self.anim_pending_frame) return;
 
         const buf = self.buffer orelse return;
@@ -298,7 +285,7 @@ pub const Sidebar = struct {
         const t = if (self.anim_duration_ms <= 0) 1.0 else
             @min(1.0, @as(f32, @floatFromInt(elapsed)) / @as(f32, @floatFromInt(self.anim_duration_ms)));
 
-        // ease-out cubic: 1 - (1-t)^3
+        // Ease-out cubic: 1 - (1-t)^3
         const inv = 1.0 - t;
         const eased = 1.0 - inv * inv * inv;
 
@@ -398,7 +385,6 @@ pub const Sidebar = struct {
 
         const M = Appearance.sidebar_margin;
 
-        // Background rectangle (with border and radius)
         const E = Appearance.sidebar_elevation;
         const P = Appearance.sidebar_padding;
         const bg_x = E;
@@ -407,18 +393,17 @@ pub const Sidebar = struct {
         const bg_h = self.height - 2 * M;
         const bg_r = Appearance.sidebar_bg_radius;
 
-        // Border (1px outline)
+        // Border and fill
         canvas.fillRoundedRectMSAA(bg_x, bg_y, bg_w, bg_h, bg_r, colBgBorder);
-        // Fill inside border
         canvas.fillRoundedRectMSAA(bg_x + 1, bg_y + 1, bg_w - 2, bg_h - 2, bg_r - 1, colBg);
 
-        // Layout: ColumnLayout inside background, 10px padding, 10px spacing
+        // Inner layout
         const inner_x = bg_x + P;
         const inner_y = bg_y + P;
         const inner_w = bg_w - P * 2;
         var cur_y: i32 = inner_y;
 
-        // Section 1: SystemButtonRow
+        // SystemButtonRow
         const sys_row_h: i32 = 40;
         const pill_h = sys_row_h;
         const pill_r = @divTrunc(pill_h, 2);
@@ -477,7 +462,7 @@ pub const Sidebar = struct {
 
         cur_y += sys_row_h + 10;
 
-        // Section 2: QuickSliders (volume + mic in ONE container)
+        // QuickSliders: volume + mic
         // end-4: single colLayer1 rect with verticalPadding=4, horizontalPadding=12
         // Each slider fills width, stacked vertically
         const sliders_v_pad: i32 = 4;
@@ -526,7 +511,7 @@ pub const Sidebar = struct {
 
         cur_y += sliders_total_h + 10;
 
-        // Section 3: QuickToggles (classic style: transparent bg, ButtonGroup with colLayer1)
+        // QuickToggles
         // end-4: spacing 5, padding 5, radius 19
         const toggle_h: i32 = 50;
         canvas.fillRoundedRectMSAA(inner_x, cur_y, inner_w, toggle_h, Appearance.sidebar_widget_radius, colLayer1);
@@ -552,7 +537,7 @@ pub const Sidebar = struct {
 
         cur_y += toggle_h + 10;
 
-        // Section 4: CenterWidgetGroup (notifications)
+        // Notifications
         const bottom_h: i32 = if (self.bottom_collapsed) 50 else 350;
         const bottom_y = self.height - M - P - bottom_h;
         const notif_h = @max(0, bottom_y - cur_y);
@@ -796,7 +781,7 @@ pub const Sidebar = struct {
 
         cur_y += notif_h + 10;
 
-        // Section 5: BottomWidgetGroup
+        // BottomWidgetGroup
         canvas.fillRoundedRectMSAA(inner_x, bottom_y, inner_w, bottom_h, Appearance.sidebar_widget_radius, colLayer1);
 
         if (self.bottom_collapsed) {
@@ -1317,7 +1302,6 @@ pub const Sidebar = struct {
             return;
         }
 
-        // Section 5: BottomWidgetGroup
         const bottom_h: i32 = if (self.bottom_collapsed) 50 else Appearance.sidebar_bottom_height;
         const bottom_y = self.height - M - P - bottom_h;
         if (y >= bottom_y and y < bottom_y + bottom_h) {
@@ -1598,7 +1582,7 @@ pub const Sidebar = struct {
             return;
         }
 
-        // Section 4: Notifications status bar
+        // Notifications status bar
         const notif_inner_pad: i32 = 5;
         const sliders_total_h: i32 = 4 + 30 + 4 + 30 + 4;
         const notif_h = self.height - (M + P + 40 + 10 + sliders_total_h + 10 + 50 + 10) - bottom_h - P - M;

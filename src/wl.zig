@@ -146,8 +146,6 @@ pub const Context = struct {
             mgr.release();
             self.dwl_ipc_manager = null;
         }
-
-        // Second roundtrip done by caller after seat listener is set (see main.zig)
     }
 
     pub fn deinit(self: *Context) void {
@@ -309,14 +307,13 @@ fn toplevelHandleListener(handle: *zwlr.ForeignToplevelHandleV1, event: zwlr.For
             std.log.info("toplevel app_id: '{s}'", .{src});
         },
         .state => |ev| {
-            // State: 0=maximized, 1=minimized, 2=fullscreen, 3=active
             var is_active = false;
             const states = ev.state.data orelse return;
             const state_bytes = @as([*]const u8, @ptrCast(states))[0..ev.state.size];
             var i: usize = 0;
             while (i + 4 <= state_bytes.len) : (i += 4) {
                 const state_val = std.mem.readInt(u32, state_bytes[i..][0..4], .little);
-                if (state_val == 3) is_active = true; // 3 = active
+                if (state_val == 3) is_active = true;
             }
             if (is_active) {
                 ctx.active_toplevel = idx;
@@ -348,7 +345,6 @@ fn toplevelHandleListener(handle: *zwlr.ForeignToplevelHandleV1, event: zwlr.For
 fn dwlIpcOutputListener(_: *zdwl.IpcOutputV2, event: zdwl.IpcOutputV2.Event, ctx: *Context) void {
     switch (event) {
         .tag => |ev| {
-            // TagState is bitmask: bit 0 = active, bit 1 = urgent
             const state_val: c_int = @intFromEnum(ev.state);
             if (state_val & 1 != 0) {
                 ctx.dwl_ipc_active_tag = ev.tag;
@@ -449,8 +445,6 @@ pub const LayerSurface = struct {
 
         layer.setSize(0, height);
         layer.setAnchor(anchor);
-        // Bar exclusive zone = bar height only (40px). No Hyprland gaps in MangoWM/Niri.
-        // The gap is handled by the sidebar's own offset below.
         layer.setExclusiveZone(@intCast(Appearance.bar_height));
         layer.setKeyboardInteractivity(.none);
 

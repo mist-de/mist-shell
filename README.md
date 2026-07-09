@@ -49,11 +49,11 @@ sudo zypper install wayland-devel wayland-protocols-devel libxkbcommon-devel \
   freetype2-devel harfbuzz-devel basu-devel imagemagick wireplumber zig
 ```
 
-**NixOS (flake):**
+**NixOS:**
 ```nix
+# flake.nix
 {
   inputs.mist-shell.url = "github:mist-de/mist-shell";
-
   outputs = { self, nixpkgs, mist-shell, ... }: {
     nixosConfigurations.mybox = nixpkgs.lib.nixosSystem {
       modules = [
@@ -65,7 +65,7 @@ sudo zypper install wayland-devel wayland-protocols-devel libxkbcommon-devel \
 }
 ```
 
-**NixOS (legacy shell):**
+Or use the legacy shell:
 ```sh
 nix-shell
 just build-release
@@ -88,8 +88,9 @@ Requires `wlr-layer-shell`, `ext-workspace-v1`, and `zwlr-foreign-toplevel-manag
 
 | Compositor | Status |
 |------------|--------|
-| River      | Confirmed |
 | MangoWM    | Confirmed (dwl-based) |
+| River      | Confirmed |
+| Niri       | Confirmed |
 
 ## IPC (Remote Control)
 

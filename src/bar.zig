@@ -19,8 +19,6 @@ const SIDEBAR_W = sidebar_mod.SIDEBAR_W;
 const Rect = config_mod.Rect;
 const Appearance = config_mod.Appearance;
 
-// OutputState: per-output bar lifecycle
-
 pub const OutputState = struct {
     bar: ?Bar = null,
     output_idx: usize,
@@ -97,8 +95,6 @@ pub fn markAllDirty(ctx: *Context) void {
         if (outputs[i].bar) |*bar| bar.needs_full_redraw = true;
     }
 }
-
-// Bar: widget drawing and layout
 
 pub const Bar = struct {
     pub fn layerSurfaceListener(ls: *zwlr.LayerSurfaceV1, event: zwlr.LayerSurfaceV1.Event, bar: *Bar) void {
@@ -198,7 +194,6 @@ pub const Bar = struct {
 
         canvas.fill(Color.transparent);
 
-        // Colors: M3 dark theme
         const colLayer0 = Color.rgba(0x14, 0x13, 0x13, 0xFF);
         const colLayer1 = Color.rgba(0x1c, 0x1b, 0x1c, 0xFF);
         const colOnLayer0 = Color.rgba(0xe6, 0xe1, 0xe1, 0xFF);
@@ -212,7 +207,6 @@ pub const Bar = struct {
         const colSubtext = colOutline;
         const colVolHigh = Color.rgba(0xf2, 0x6a, 0x6a, 0xFF);
 
-        // Layout constants
         const screenRounding: i32 = 23;
         const smallRounding: i32 = 12;
         const fullRounding: i32 = 9999;
@@ -238,7 +232,6 @@ pub const Bar = struct {
         const mcX: i32 = lcX + centerSideModuleWidth + centerSpacing;
         const rcX: i32 = mcX + wsBarGroupW + centerSpacing;
 
-        // Workspace state
         var occupiedBuf: [16]bool = .{false} ** 16;
         var activeWs: usize = 0;
         const wsDisplayCount = @min(wsCount, ctx.workspace_count);
@@ -255,7 +248,6 @@ pub const Bar = struct {
         }
         const occupied = occupiedBuf;
 
-        // Active window text: pre-compute for layout
         const appName: []const u8 = if (ctx.active_toplevel) |at|
             std.mem.sliceTo(&ctx.toplevels[at].app_id, 0)
         else
@@ -266,10 +258,10 @@ pub const Bar = struct {
         else
             std.fmt.bufPrint(&wsBuf, "Workspace {d}", .{activeWs + 1}) catch "Workspace 1";
 
-        // 1. Bar background: full-width, no radius
+        // Bar background
         canvas.fillRect(0, 0, bar_w, bar_h, colLayer0);
 
-        // 2. Left section: sidebar button + active window
+        // Left section: sidebar button + active window
         const sidebarBtnW: i32 = 30;
         const sidebarBtnX: i32 = screenRounding;
 
@@ -306,9 +298,7 @@ pub const Bar = struct {
             }
         }
 
-        // 3. Center: left (resources+media), middle (workspaces), right (indicators)
-
-        // 3a. Left center: resources + media
+        // Center section: resources + media
         canvas.fillRoundedRectAA(lcX, groupBgY, centerSideModuleWidth, groupBgH, smallRounding, colLayer1);
 
         var resX: i32 = lcX + groupPadding + 4;
@@ -417,7 +407,7 @@ pub const Bar = struct {
             }
         }
 
-        // 3b. Middle center: workspaces
+        // Workspaces
         canvas.fillRoundedRectAA(mcX, groupBgY, wsBarGroupW, groupBgH, smallRounding, colLayer1);
 
         const wsY: i32 = centerY - @divTrunc(wsBtnWidth, 2);
@@ -469,7 +459,7 @@ pub const Bar = struct {
             canvas.fillCircle(dotCX, centerY, dotR, textColor);
         }
 
-        // 4. Right group: notifications, indicators, clock, battery
+        // Right section: notifications, indicators, clock, battery
         // 15px spacing between indicators
         const indSpacing: i32 = 15;
         const rightEdgeX = bar_w - screenRounding;
@@ -675,7 +665,7 @@ pub const Bar = struct {
             }
         }
 
-        // 6. Commit to compositor (no flush — batched in main loop)
+        // Commit to compositor (flushed in main loop)
         self.layer.surface.attach(buf.buffer, 0, 0);
         self.layer.surface.damageBuffer(0, 0, @intCast(buf.width), @intCast(buf.height));
         self.layer.surface.commit();
@@ -684,7 +674,7 @@ pub const Bar = struct {
     }
 };
 
-// Input dispatch: seat, pointer, keyboard, click handling
+// Input handling
 
 pub fn seatListener(seat: *wl.Seat, event: wl.Seat.Event, ctx: *Context) void {
     std.log.info("seat event: {s}", .{@tagName(event)});
@@ -939,26 +929,17 @@ fn pointerListener(pointer: *wl.Pointer, event: wl.Pointer.Event, ctx: *Context)
 
 fn keyboardListener(kb: *wl.Keyboard, event: wl.Keyboard.Event, ctx: *Context) void {
     _ = kb;
-    std.log.info("keyboardListener called: event={s}", .{@tagName(event)});
     switch (event) {
         .keymap => |km| {
             if (km.size == 0) return;
-            const map_shm = std.posix.mmap(
-                null,
-                km.size,
-                std.posix.PROT{ .READ = true },
-                std.posix.MAP{ .TYPE = .PRIVATE },
-                km.fd,
-                0,
-            ) catch |err| {
+            const map_shm = std.posix.mmap(null, km.size, std.posix.PROT{ .READ = true }, std.posix.MAP{ .TYPE = .PRIVATE }, km.fd, 0) catch |err| {
                 std.log.err("keyboard: mmap keymap failed: {}", .{err});
                 _ = std.c.close(km.fd);
                 return;
             };
             _ = std.c.close(km.fd);
 
-            if (ctx.xkb_ctx == null)
-                ctx.xkb_ctx = cc.xkb_context_new(cc.XKB_CONTEXT_NO_FLAGS);
+            if (ctx.xkb_ctx == null) ctx.xkb_ctx = cc.xkb_context_new(cc.XKB_CONTEXT_NO_FLAGS);
             if (ctx.xkb_ctx) |xkb_ctx| {
                 const keymap_str: []const u8 = @ptrCast(map_shm[0..km.size]);
                 const xkb_km = cc.xkb_keymap_new_from_string(xkb_ctx, keymap_str.ptr, cc.XKB_KEYMAP_FORMAT_TEXT_V1, 0);
@@ -967,7 +948,6 @@ fn keyboardListener(kb: *wl.Keyboard, event: wl.Keyboard.Event, ctx: *Context) v
                     if (ctx.xkb_keymap) |old| cc.xkb_keymap_unref(old);
                     ctx.xkb_keymap = k;
                     ctx.xkb_state = cc.xkb_state_new(k);
-                    std.log.info("keyboard: xkb initialized, state={any}", .{ctx.xkb_state});
                 } else {
                     std.log.err("keyboard: xkb_keymap_new_from_string returned null", .{});
                 }

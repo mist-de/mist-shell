@@ -6,8 +6,6 @@ fn nowMs() i64 {
     return @as(i64, @intCast(ts.sec)) * 1000 + @divTrunc(@as(i64, @intCast(ts.nsec)), 1_000_000);
 }
 
-// Geometry types
-
 pub const Size = u32;
 
 pub const Rect = struct {
@@ -17,8 +15,6 @@ pub const Rect = struct {
     height: Size,
     pub const zero: Rect = .{ .x = 0, .y = 0, .width = 0, .height = 0 };
 };
-
-// Color
 
 pub const Color = extern struct {
     r: u8,
@@ -59,8 +55,6 @@ pub const Color = extern struct {
     }
 };
 
-// Appearance constants
-
 pub const Appearance = struct {
     pub const bar_height: i32 = 40;
     pub const screen_rounding: i32 = 23;
@@ -96,7 +90,6 @@ pub const Appearance = struct {
     pub const font_large: i32 = 17;
     pub const font_larger: i32 = 19;
 
-    // M3 color palette
     pub const m3background = Color.rgba(0x14, 0x13, 0x13, 0xFF);
     pub const m3on_background = Color.rgba(0xe6, 0xe1, 0xe1, 0xFF);
     pub const m3surface_container_low = Color.rgba(0x1c, 0x1b, 0x1c, 0xFF);
@@ -110,7 +103,6 @@ pub const Appearance = struct {
     pub const m3secondary_container = Color.rgba(0x4d, 0x4b, 0x4d, 0xFF);
     pub const m3on_secondary_container = Color.rgba(0xec, 0xe6, 0xe9, 0xFF);
 
-    // Semantic layer colors
     pub const col_layer0 = m3background;
     pub const col_layer0_border = Color.rgba(0x3a, 0x39, 0x3d, 0xFF); // mix(outlineVariant, layer0, 0.4)
     pub const col_layer1 = Color.rgba(0x1c, 0x1b, 0x1c, 0xFF);
@@ -133,19 +125,17 @@ pub const Appearance = struct {
 
     // Sidebar sizing (from end-4 Appearance.sizes)
     pub const sidebar_width: i32 = 460;
-    pub const sidebar_margin: i32 = 5; // hyprlandGapsOut
-    pub const sidebar_gap: i32 = 2; // visual gap between bar bottom and sidebar content top
-    pub const sidebar_elevation: i32 = 10; // elevationMargin (left gap)
-    pub const sidebar_padding: i32 = 10; // inner padding
-    pub const sidebar_bg_radius: i32 = 19; // screenRounding(23) - hyprlandGapsOut(5) + 1
-    pub const sidebar_widget_radius: i32 = 17; // normal rounding
-    pub const sidebar_small_radius: i32 = 12; // small rounding (pills, notification items)
-    pub const sidebar_full_radius: i32 = 9999; // pill shapes
-    pub const sidebar_bottom_height: i32 = 350; // BottomWidgetGroup fixed height
-    pub const sidebar_bottom_nav_w: i32 = 50; // navigation rail width
+    pub const sidebar_margin: i32 = 5;
+    pub const sidebar_gap: i32 = 2;
+    pub const sidebar_elevation: i32 = 10;
+    pub const sidebar_padding: i32 = 10;
+    pub const sidebar_bg_radius: i32 = 19;
+    pub const sidebar_widget_radius: i32 = 17;
+    pub const sidebar_small_radius: i32 = 12;
+    pub const sidebar_full_radius: i32 = 9999;
+    pub const sidebar_bottom_height: i32 = 350;
+    pub const sidebar_bottom_nav_w: i32 = 50;
 };
-
-// Configuration
 
 pub const Config = struct {
     height: u32 = 40,
@@ -238,22 +228,20 @@ pub fn resolveFallbackFont(allocator: std.mem.Allocator) ?[]u8 {
     for (&[_][]const u8{ "NotoSansBengali.ttf", "NotoSansBengali-Regular.ttf", "Mukti-Book.ttf" }) |alt| {
         if (resolveFontPath(allocator, alt)) |p| return p else |_| {}
     }
-    // fontconfig fallback by family
     for (&[_][]const u8{ "Noto Sans Bengali", "Noto Sans Bengali Regular", "Mukti" }) |fam| {
         if (findFontByFamily(allocator, fam)) |p| return p;
     }
     return null;
 }
 
-    // Distro icon from /etc/os-release
 pub fn detectDistroIcon() u21 {
     const fd = std.c.open("/etc/os-release", .{}, @as(c_uint, 0));
-    if (fd == -1) return 0xF313;
+    if (fd == -1) return 0xF301;
     defer _ = std.c.close(fd);
 
     var buf: [2048]u8 = undefined;
     const nread = std.c.read(fd, &buf, buf.len);
-    if (nread <= 0) return 0xF313;
+    if (nread <= 0) return 0xF301;
     const content = buf[0..@as(usize, @intCast(nread))];
 
     var lines = std.mem.splitScalar(u8, content, '\n');
@@ -261,7 +249,6 @@ pub fn detectDistroIcon() u21 {
         const line = std.mem.trim(u8, raw, &[_]u8{ ' ', '\r' });
         if (!std.mem.startsWith(u8, line, "ID=")) continue;
 
-        // Handle ID=nixos or ID="nixos"
         var id = line[3..];
         if (id.len > 0 and id[0] == '"') {
             if (id.len < 2) continue;
@@ -282,13 +269,11 @@ pub fn detectDistroIcon() u21 {
         if (std.mem.eql(u8, id, "void")) return 0xF17C;
         if (std.mem.eql(u8, id, "endeavouros")) return 0xF310;
 
-        return 0xF313; // nixos fallback for unknown
+        return 0xF301; // generic Linux fallback for unknown distro
     }
 
-    return 0xF313; // nixos fallback
+    return 0xF301; // generic Linux fallback (no /etc/os-release found)
 }
-
-// System resources: RAM, CPU, temp, battery
 
 pub const ResourceState = struct {
     memory_used_pct: f32 = 0,
@@ -317,7 +302,6 @@ pub fn updateResources(state: *ResourceState) void {
     readCpuStat(state);
     readTemp(state);
     readBattery(state);
-    // Audio tracked locally, NOT re-read (preserves user changes)
 }
 
 fn readMemInfo(state: *ResourceState) void {
@@ -448,7 +432,6 @@ fn readTemp(state: *ResourceState) void {
 }
 
 fn readFileFirstLine(path: []const u8, buf: []u8) ?[]u8 {
-    // open() requires null-terminated string
     var path_buf: [256:0]u8 = undefined;
     if (path.len >= path_buf.len) return null;
     @memcpy(path_buf[0..path.len], path);
@@ -458,7 +441,6 @@ fn readFileFirstLine(path: []const u8, buf: []u8) ?[]u8 {
     defer _ = std.c.close(fd);
     const n = std.c.read(fd, buf.ptr, buf.len);
     if (n <= 0) return null;
-    // Trim trailing newline/whitespace
     var end: usize = @intCast(n);
     while (end > 0 and (buf[end - 1] == '\n' or buf[end - 1] == '\r' or buf[end - 1] == ' ')) {
         end -= 1;
@@ -477,15 +459,13 @@ fn readBattery(state: *ResourceState) void {
         const pct = std.fmt.parseInt(i8, cap_str, 10) catch continue;
         state.battery_pct = @min(100, @max(0, pct));
 
-        // Charging status
         var stat_path: [128]u8 = undefined;
         const stat_path_s = std.fmt.bufPrint(stat_path[0..], "/sys/class/power_supply/{s}/status", .{bat}) catch return;
         const status_str = readFileFirstLine(stat_path_s, buf[0..]) orelse "";
         state.battery_charging = std.mem.eql(u8, status_str, "Charging") or std.mem.eql(u8, status_str, "Full");
 
-        return; // found a battery
+        return;
     }
-    // No battery found (desktop)
     state.battery_pct = -1;
     state.battery_charging = false;
 }
