@@ -142,7 +142,7 @@ pub const Sidebar = struct {
 
         ls.setAnchor(.{ .top = true, .right = true, .bottom = true });
         ls.setSize(@as(u32, @intCast(SIDEBAR_W)), 0);
-        ls.setKeyboardInteractivity(.exclusive);
+        ls.setKeyboardInteractivity(.on_demand);
         ls.setExclusiveZone(0);
         ls.setListener(*Sidebar, layerSurfaceListener, self);
 
@@ -241,7 +241,7 @@ pub const Sidebar = struct {
         const ls = self.layer_surface orelse return;
         const buf = self.buffer orelse return;
         const s = self.surface orelse return;
-        ls.setKeyboardInteractivity(.exclusive);
+        ls.setKeyboardInteractivity(.on_demand);
         ls.setMargin(0, -SIDEBAR_W, 0, 0);
         s.attach(buf.buffer, 0, 0);
         s.damageBuffer(0, 0, buf.width, buf.height);
